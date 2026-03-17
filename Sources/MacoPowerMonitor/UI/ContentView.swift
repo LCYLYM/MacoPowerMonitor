@@ -501,6 +501,7 @@ private struct ProcessEnergyRow: View {
 
 private struct SettingsView: View {
     @ObservedObject var store: PowerMonitorStore
+    @ObservedObject private var runtimeSettings = AppRuntimeSettings.shared
     @AppStorage(PowermetricsSubsystemPowerProvider.autoAttemptDefaultsKey) private var autoAttempt = false
     @Environment(\.dismiss) private var dismiss
 
@@ -514,6 +515,53 @@ private struct SettingsView: View {
                     dismiss()
                 }
                 .buttonStyle(.bordered)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(
+                    "后台保活（保持状态栏常驻）",
+                    isOn: Binding(
+                        get: { runtimeSettings.backgroundKeepAliveEnabled },
+                        set: { runtimeSettings.setBackgroundKeepAlive(enabled: $0) }
+                    )
+                )
+                .help("开启后，应用会向系统声明自己不应被自动或突然终止。不会阻止系统睡眠，也不会额外持续提权。")
+
+                Text(runtimeSettings.backgroundKeepAliveEnabled
+                     ? "当前已启用后台保活，应用会更偏向保持状态栏常驻。"
+                     : "当前未启用后台保活，系统可在合适时机自动终止空闲应用。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(PowerMonitorTheme.tertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(
+                    "开机自动启动",
+                    isOn: Binding(
+                        get: { runtimeSettings.launchAtLoginEnabled },
+                        set: { runtimeSettings.setLaunchAtLogin(enabled: $0) }
+                    )
+                )
+                .help("开启后，登录当前用户时会自动启动本应用。该功能仅在打包后的 .app 中可用。")
+
+                HStack {
+                    Text("当前状态")
+                        .foregroundStyle(PowerMonitorTheme.muted)
+                    Spacer()
+                    Text(runtimeSettings.launchAtLoginStatusText)
+                        .foregroundStyle(runtimeSettings.launchAtLoginEnabled ? PowerMonitorTheme.green : PowerMonitorTheme.secondary)
+                }
+                .font(.system(size: 11, weight: .medium))
+
+                Text(runtimeSettings.launchAtLoginDetailText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(PowerMonitorTheme.tertiary)
+
+                if let loginItemError = runtimeSettings.launchAtLoginErrorMessage {
+                    Text(loginItemError)
+                        .font(.system(size: 11))
+                        .foregroundStyle(PowerMonitorTheme.red)
+                }
             }
 
             Toggle("自动尝试无密码 sudo 获取 SoC 分项功耗", isOn: $autoAttempt)
@@ -543,7 +591,7 @@ private struct SettingsView: View {
             Spacer()
         }
         .padding(18)
-        .frame(width: 420, height: 300)
+        .frame(width: 430, height: 420)
     }
 }
 

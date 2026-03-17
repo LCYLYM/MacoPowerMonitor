@@ -58,6 +58,8 @@ It focuses on three things:
 | Bidirectional power view | Separate `System Input`, `Battery Output`, and `Battery Recharge` clearly |
 | Charge and discharge current | Understand battery flow direction without ambiguous mixed lines |
 | Real battery health metrics | Design capacity, full charge capacity, cycle count, health, voltage and temperature |
+| Background keepalive setting | Keep the app less likely to be automatically terminated while staying lightweight |
+| Launch at login setting | Start the menu bar monitor automatically after user login |
 | Top energy processes | Spot which apps are draining power right now |
 | On-demand SoC sampling | CPU / GPU / ANE breakdown when you explicitly allow privileged sampling |
 
@@ -157,7 +159,6 @@ docs/images
 
 ### Roadmap
 
-- Launch at login
 - Battery event timeline
 - Historical export
 - Adapter mismatch and thermal alerts
@@ -209,6 +210,8 @@ Maco Power Monitor 是一个轻量级 macOS 状态栏电源监控工具，重点
 | 双向功率视图 | 清晰区分 `系统输入`、`电池输出`、`电池回充` |
 | 充放电电流拆分 | 不把正负方向混在一起，更容易理解当前流向 |
 | 真实电池健康指标 | 设计容量、满充容量、循环次数、健康度、电压、温度 |
+| 后台保活设置 | 在保持轻量的前提下，降低应用被系统自动终止的概率 |
+| 开机自启设置 | 登录当前用户后自动启动状态栏监控 |
 | 高耗电进程列表 | 更快定位当前最耗电的应用 |
 | 按需 SoC 采样 | 在你主动授权时，获取 CPU / GPU / ANE 分项功耗 |
 
@@ -308,7 +311,6 @@ docs/images
 
 ### 路线图
 
-- 开机自启动
 - 电池事件时间线
 - 历史数据导出
 - 适配器不匹配与温度告警

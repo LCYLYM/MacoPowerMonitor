@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = PowerMonitorStore.shared
+    private let runtimeSettings = AppRuntimeSettings.shared
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "app")
     private var statusItem: NSStatusItem?
     private var panel: NSPanel?
@@ -16,6 +17,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        runtimeSettings.configureOnLaunch()
+
+        if let selfTest = ProcessInfo.processInfo.environment["MACO_POWER_MONITOR_SELF_TEST"] {
+            print(runtimeSettings.runSelfTest(named: selfTest))
+            NSApp.terminate(nil)
+            return
+        }
+
         configureObservers()
         DispatchQueue.main.async { [weak self] in
             self?.configureStatusItemIfNeeded()
