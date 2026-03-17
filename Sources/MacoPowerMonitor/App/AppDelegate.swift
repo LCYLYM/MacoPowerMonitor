@@ -15,10 +15,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hostingController = NSHostingController(rootView: ContentView(store: PowerMonitorStore.shared))
         let window = NSWindow(contentViewController: hostingController)
         window.title = "MacoPowerMonitor Preview"
-        window.setContentSize(NSSize(width: AppConstants.panelWidth, height: 860))
+        window.setContentSize(NSSize(width: AppConstants.panelWidth, height: 1020))
         window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        window.isOpaque = false
+        window.backgroundColor = .clear
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

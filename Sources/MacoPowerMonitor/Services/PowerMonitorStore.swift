@@ -12,8 +12,8 @@ final class PowerMonitorStore: ObservableObject {
     private let scheduler: RepeatingTaskScheduler
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "store")
 
-    private static let maxHistoryAge: TimeInterval = 60 * 60 * 24
-    private static let maxHistoryCount = 2_880
+    private static let maxHistoryAge: TimeInterval = 60 * 60 * 24 * 10
+    private static let maxHistoryCount = 30_000
 
     static let shared = PowerMonitorStore.live()
 
@@ -60,15 +60,45 @@ final class PowerMonitorStore: ObservableObject {
         }
     }
 
-    func chartPoints(for metric: ChartMetric, window: TimeInterval = 60 * 60) -> [Double] {
-        let lowerBound = Date().addingTimeInterval(-window)
+    func chartPoints(for metric: ChartMetric, range: ChartTimeRange) -> [PowerChartPoint] {
+        let lowerBound = Date().addingTimeInterval(-range.interval)
         let samples = history.filter { $0.timestamp >= lowerBound }
 
-        switch metric {
-        case .power:
-            return samples.compactMap(\.preferredPowerWatts)
-        case .batteryLevel:
-            return samples.map { $0.batteryLevel * 100.0 }
+        guard !samples.isEmpty else {
+            return []
+        }
+
+        let bucketWidth = range.interval / Double(range.bucketCount)
+        let calendar = Calendar.current
+        var buckets: [[PowerSnapshot]] = Array(repeating: [], count: range.bucketCount)
+
+        for sample in samples {
+            let elapsed = sample.timestamp.timeIntervalSince(lowerBound)
+            let index = min(max(Int(elapsed / bucketWidth), 0), range.bucketCount - 1)
+            buckets[index].append(sample)
+        }
+
+        return buckets.enumerated().compactMap { index, bucket in
+            guard !bucket.isEmpty else { return nil }
+
+            let timestamp = lowerBound.addingTimeInterval((Double(index) + 0.5) * bucketWidth)
+            let isCharging = bucket.last?.isCharging ?? false
+            let value: Double?
+
+            switch metric {
+            case .power:
+                let values = bucket.compactMap(\.preferredPowerWatts)
+                value = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+            case .batteryLevel:
+                let values = bucket.map { $0.batteryLevel * 100.0 }
+                value = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+            case .chargeRate:
+                let values = bucket.compactMap(\.amperageMilliamps).map { Double($0) / 1_000.0 }
+                value = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+            }
+
+            guard let value else { return nil }
+            return PowerChartPoint(timestamp: calendar.date(bySettingHour: calendar.component(.hour, from: timestamp), minute: calendar.component(.minute, from: timestamp), second: 0, of: timestamp) ?? timestamp, value: value, isCharging: isCharging)
         }
     }
 

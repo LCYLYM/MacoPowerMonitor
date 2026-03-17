@@ -4,10 +4,14 @@ import OSLog
 
 struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "collector")
+    private let supplementalProvider = SupplementalBatteryMetricsProvider.shared
+    private let subsystemPowerProvider = PowermetricsSubsystemPowerProvider.shared
 
     func readSnapshot() throws -> PowerSnapshot {
         let sourceDescription = try readPrimaryPowerSource()
         let adapter = readAdapterDetails()
+        let supplemental = supplementalProvider.currentMetrics()
+        let subsystem = subsystemPowerProvider.currentMetrics()
         let batteryHealthCondition = sourceDescription.stringValue(forCKey: kIOPSBatteryHealthConditionKey)
         let batteryHealthState = sourceDescription.stringValue(forCKey: kIOPSBatteryHealthKey)
 
@@ -23,9 +27,9 @@ struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
             source = .unknown
         }
 
-        let voltage = sourceDescription.intValue(forCKey: kIOPSVoltageKey)
-        let current = sourceDescription.intValue(forCKey: kIOPSCurrentKey)
-        let temperature = normalizeTemperature(sourceDescription.intValue(forCKey: kIOPSTemperatureKey))
+        let voltage = sourceDescription.intValue(forCKey: kIOPSVoltageKey) ?? supplemental?.voltageMillivolts
+        let current = sourceDescription.intValue(forCKey: kIOPSCurrentKey) ?? supplemental?.amperageMilliamps
+        let temperature = normalizeTemperature(sourceDescription.intValue(forCKey: kIOPSTemperatureKey)) ?? supplemental?.temperatureCelsius
 
         let currentCapacityPercent = sourceDescription.doubleValue(forCKey: kIOPSCurrentCapacityKey)
         let maxPercentCapacity = sourceDescription.doubleValue(forCKey: kIOPSMaxCapacityKey)
@@ -37,13 +41,15 @@ struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
             return min(max(currentCapacityPercent / maxPercentCapacity, 0.0), 1.0)
         }()
 
-        let adapterWatts = adapter.intValue(forCKey: kIOPSPowerAdapterWattsKey)
-        let adapterCurrent = adapter.intValue(forCKey: kIOPSPowerAdapterCurrentKey)
-        let adapterVoltage = adapter.intValue(forKey: "AdapterVoltage")
-        let batteryPower = Self.powerFrom(voltageMillivolts: voltage, amperageMilliamps: current)
+        let adapterWatts = adapter.intValue(forCKey: kIOPSPowerAdapterWattsKey) ?? supplemental?.adapterWatts
+        let adapterCurrent = adapter.intValue(forCKey: kIOPSPowerAdapterCurrentKey) ?? supplemental?.adapterCurrentMilliamps
+        let adapterVoltage = adapter.intValue(forKey: "AdapterVoltage") ?? supplemental?.adapterVoltageMillivolts
+        let batteryPower = supplemental?.batteryPowerWatts ?? Self.powerFrom(voltageMillivolts: voltage, amperageMilliamps: current)
 
         let systemPower: Double?
-        if let adapterWatts, source == .acPower {
+        if let systemInputWatts = supplemental?.systemInputWatts {
+            systemPower = systemInputWatts
+        } else if let adapterWatts, source == .acPower {
             systemPower = Double(adapterWatts)
         } else {
             systemPower = batteryPower.map(abs)
@@ -56,12 +62,15 @@ struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
             batteryLevel: batteryLevel,
             currentChargePercent: currentCapacityPercent,
             nominalCapacity: sourceDescription.intValue(forCKey: kIOPSNominalCapacityKey),
-            designCapacity: sourceDescription.intValue(forCKey: kIOPSDesignCapacityKey),
+            designCapacity: sourceDescription.intValue(forCKey: kIOPSDesignCapacityKey) ?? supplemental?.designCapacityMah,
+            fullChargeCapacity: supplemental?.fullChargeCapacityMah,
             designCycleCount: sourceDescription.intValue(forKey: "DesignCycleCount"),
+            cycleCount: supplemental?.cycleCount,
+            maximumCapacityPercent: supplemental?.maximumCapacityPercent,
             hardwareSerialNumber: sourceDescription.stringValue(forCKey: kIOPSHardwareSerialNumberKey),
             isCharging: sourceDescription.boolValue(forCKey: kIOPSIsChargingKey),
             isCharged: sourceDescription.boolValue(forCKey: kIOPSIsChargedKey),
-            timeToEmptyMinutes: normalized(minutes: sourceDescription.intValue(forCKey: kIOPSTimeToEmptyKey) ?? timeRemainingEstimate(for: source)),
+            timeToEmptyMinutes: normalized(minutes: sourceDescription.intValue(forCKey: kIOPSTimeToEmptyKey) ?? supplemental?.timeRemainingMinutes ?? timeRemainingEstimate(for: source)),
             timeToFullChargeMinutes: normalized(minutes: sourceDescription.intValue(forCKey: kIOPSTimeToFullChargeKey)),
             voltageMillivolts: voltage,
             amperageMilliamps: current,
@@ -72,7 +81,11 @@ struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
             adapterVoltageMillivolts: adapterVoltage,
             adapterCurrentMilliamps: adapterCurrent,
             systemPowerWatts: systemPower,
-            batteryPowerWatts: batteryPower
+            batteryPowerWatts: batteryPower,
+            cpuPowerWatts: subsystem.cpuWatts,
+            gpuPowerWatts: subsystem.gpuWatts,
+            anePowerWatts: subsystem.aneWatts,
+            subsystemPowerUnavailableReason: subsystem.unavailableReason
         )
 
         logger.debug("Captured power snapshot at \(snapshot.timestamp, privacy: .public)")

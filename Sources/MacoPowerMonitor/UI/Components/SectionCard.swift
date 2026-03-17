@@ -5,16 +5,16 @@ struct SectionCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.5)
-                .foregroundStyle(.white.opacity(0.4))
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(PowerMonitorTheme.tertiary)
 
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .padding(12)
         .background(PowerMonitorTheme.sectionBackground)
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(PowerMonitorTheme.cardBorder))
         .clipShape(RoundedRectangle(cornerRadius: 16))

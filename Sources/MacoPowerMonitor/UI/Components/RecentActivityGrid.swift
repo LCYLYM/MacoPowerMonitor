@@ -8,11 +8,11 @@ struct RecentActivityGrid: View {
         let minimum = values.min() ?? 0
         let maximum = values.max() ?? 1
 
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 20), spacing: 4) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 24), spacing: 3) {
             ForEach(Array(snapshots.enumerated()), id: \.offset) { _, snapshot in
                 RoundedRectangle(cornerRadius: 3)
                     .fill(color(for: snapshot.preferredPowerWatts, minimum: minimum, maximum: maximum))
-                    .frame(height: 12)
+                    .frame(height: 10)
             }
         }
     }
