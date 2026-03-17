@@ -1,50 +1,101 @@
+<div align="center">
+
 # Maco Power Monitor
 
-一个为 Apple Silicon Mac 设计的原生菜单栏电源监控工具。
+Native macOS menu bar power monitor for Apple Silicon.
 
-它专注做三件事：
+Real battery, adapter and power telemetry.
+Compact glass panel.
+No fake data.
 
-- 用真实系统数据展示电量、充电、适配器和功耗状态
-- 保持低开销、轻量级的菜单栏常驻体验
-- 在紧凑面板里提供高信息密度的可视化与解释
+[![Release](https://img.shields.io/github/v/release/LCYLYM/MacoPowerMonitor?display_name=tag&style=for-the-badge)](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/LCYLYM/MacoPowerMonitor/total?style=for-the-badge)](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-13%2B-1f6feb?style=for-the-badge)](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest)
+[![Swift](https://img.shields.io/badge/Swift-6.2-f05138?style=for-the-badge)](https://www.swift.org/)
+[![License](https://img.shields.io/github/license/LCYLYM/MacoPowerMonitor?style=for-the-badge)](LICENSE)
 
-![Maco Power Monitor overview](docs/images/overview.png)
-![Maco Power Monitor charts](docs/images/charts.png)
+[Download Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest) • [Report Bug](https://github.com/LCYLYM/MacoPowerMonitor/issues/new?template=bug_report.md) • [Request Feature](https://github.com/LCYLYM/MacoPowerMonitor/issues/new?template=feature_request.md)
 
-## 为什么值得安装
+[Direct ZIP Download](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest/download/MacoPowerMonitor-v0.1.0-macos.zip)
 
-- 原生菜单栏应用。`SwiftUI + AppKit + IOKit`，不依赖 Electron 或 WebView。
-- 无虚拟数据。界面里的指标全部来自真实系统接口或系统命令输出。
-- 低干扰设计。驻留在状态栏，点击即看，不占 Dock，不打断当前工作流。
-- 信息密度高。把电量、输入功率、电池输出、回充、电流、健康度和会话信息集中在一个轻量面板里。
-- 真实可扩展。对拿不到的指标不造数，对需要管理员权限的 SoC 分项功耗明确说明并按需采样。
+</div>
 
-## 功能亮点
+---
 
-- 状态栏图标显示当前电池状态，点击展开监控面板
-- 顶部摘要快速显示剩余时间、当前电量、系统输入、电池电流、适配器额定
-- 1 小时 / 24 小时 / 10 天趋势范围切换
-- `功耗 / 电量 / 电流` 多选显示，不需要反复切图
-- 功耗图同时展示：
-  - 系统输入
-  - 电池输出
-  - 电池回充
-- 电流图同时展示：
-  - 放电电流
-  - 充电电流
-- 电池详细数据：
-  - 设计容量
-  - 满充容量
-  - 实际循环次数
-  - 健康度
-  - 电压
-  - 温度
-- 高耗电进程列表
-- 管理员模式下按需采样 CPU / GPU / ANE 分项功耗
+Maco Power Monitor is a lightweight macOS status bar utility that helps you understand where your battery and power budget are going in real time.
 
-## 数据来源
+It focuses on three things:
 
-以下信息均来自 macOS 公开或系统级真实接口，没有模拟值：
+- Real system data only
+- Low overhead native menu bar UX
+- Dense, readable power insights without fake precision
+
+## Preview
+
+<p align="center">
+  <img src="docs/images/overview.png" alt="Overview screenshot" width="380" />
+  <img src="docs/images/charts.png" alt="Charts screenshot" width="380" />
+</p>
+
+## Why It Feels Different
+
+- Native all the way: built with `SwiftUI + AppKit + IOKit`, no Electron, no embedded browser runtime
+- Real metrics only: battery, adapter and process-energy data come from macOS system interfaces and commands
+- Compact by design: click the menu bar icon, inspect what matters, dismiss and move on
+- High signal UI: system input, battery output, recharge flow, current, battery health and top energy users in one place
+- Honest constraints: when a metric needs admin permission or cannot be read reliably, the app says so instead of inventing numbers
+
+## Highlights
+
+| What you get | Why it matters |
+| --- | --- |
+| Menu bar status icon | See battery state instantly and open the panel with one click |
+| Glass-style compact panel | macOS-native visual feel with dense information layout |
+| Multi-select chart toggles | Show `Power`, `Battery`, and `Current` together instead of constant chart switching |
+| Bidirectional power view | Distinguish `System Input`, `Battery Output`, and `Battery Recharge` clearly |
+| Charge and discharge current | Understand battery flow direction without ambiguous mixed lines |
+| Real battery health metrics | Design capacity, full charge capacity, cycle count, health percentage, voltage, temperature |
+| Top energy processes | Quickly spot which apps are draining power right now |
+| On-demand SoC sampling | CPU / GPU / ANE breakdown via privileged sampling when you explicitly allow it |
+
+## Install
+
+### Option 1: Download the app
+
+1. Open [Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest)
+2. Download `MacoPowerMonitor-v0.1.0-macos.zip`
+3. Unzip it
+4. Move `MacoPowerMonitor.app` into `Applications`
+5. Launch the app and click the menu bar icon
+
+### Option 2: Build from source
+
+Requirements:
+
+- macOS 13 or newer
+- Xcode Command Line Tools or full Xcode
+
+```bash
+swift build
+swift run
+```
+
+### Option 3: Package locally
+
+```bash
+./scripts/package_app.sh
+open dist/MacoPowerMonitor.app
+```
+
+To create the same release-style zip and checksum used for GitHub Releases:
+
+```bash
+./scripts/build_release_assets.sh
+```
+
+## Data Sources
+
+All on-screen readings are backed by real macOS data sources.
 
 - `IOPowerSources` / `IOPSGetPowerSourceDescription`
 - `IOPSCopyExternalPowerAdapterDetails`
@@ -52,55 +103,30 @@
 - `system_profiler SPPowerDataType -json`
 - `top -l 1 -stats pid,command,cpu,mem,power`
 - `powermetrics`
-  - 仅在用户主动授权管理员采样时启用
-  - 用于补充 CPU / GPU / ANE 分项功耗
 
-## 截图说明
+Notes:
 
-- README 里的截图来自真实运行中的应用界面
-- 图表中的数值和走势来自当前机器的真实电源样本
-- 透明背景为 macOS 菜单栏面板实际效果，不是设计稿拼图
+- `powermetrics` is only used for detailed CPU / GPU / ANE power when you explicitly trigger privileged sampling
+- the app does not fill missing fields with fabricated estimates
 
-## 安装方式
+## What The Charts Mean
 
-### 方式一：本地构建
+- `Power`: shows system input, battery output, and battery recharge as separate flows
+- `Battery`: shows battery percentage history
+- `Current`: separates discharge current and charge current instead of mixing directions together
 
-要求：
+This is intentional.
+Adapter rated wattage, actual system input and battery-side flow are not the same thing, so the app keeps them distinct.
 
-- macOS 13 或更高版本
-- Xcode Command Line Tools 或完整 Xcode
+## Privacy and Security
 
-构建与运行：
+- no telemetry upload
+- no third-party analytics SDK
+- no cloud account requirement
+- no hidden background elevation loop
+- local history stays on your Mac at `~/Library/Application Support/MacoPowerMonitor/power-history.json`
 
-```bash
-swift build
-swift run
-```
-
-### 方式二：打包为 `.app`
-
-```bash
-./scripts/package_app.sh
-open dist/MacoPowerMonitor.app
-```
-
-## 权限与说明
-
-- 普通模式下，不需要管理员权限即可读取大部分电池、电源和适配器信息。
-- 更细的 SoC 分项功耗依赖 `powermetrics`，通常需要管理员授权。
-- 设置页里的“管理员采样”是按需触发，不会默认后台持续提权。
-- 适配器额定功率表示供电上限，不等于这一刻整机实际消耗。
-- 系统输入和电池输出是两个方向不同的概念，所以图表会分开显示。
-
-## 隐私与安全
-
-- 不上传遥测数据
-- 不接入第三方分析 SDK
-- 不发送任何设备信息到远端服务
-- 历史样本默认保存在本机：
-  - `~/Library/Application Support/MacoPowerMonitor/power-history.json`
-
-## 项目结构
+## Project Structure
 
 ```text
 Sources/MacoPowerMonitor/App
@@ -112,35 +138,33 @@ scripts
 docs/images
 ```
 
-- `App`: 状态栏生命周期、面板与启动逻辑
-- `Core`: 核心模型与图表序列定义
-- `Services`: 系统采集、权限采样、历史存储、状态管理
-- `Support`: 常量、路径、格式化、调度器
-- `UI`: 面板布局、图表组件、玻璃化视觉和设置界面
+- `App`: menu bar lifecycle, floating panel, app startup behavior
+- `Core`: core models and chart series definitions
+- `Services`: system collectors, persistence, scheduling, privileged power sampling
+- `Support`: constants, formatting, paths, helpers
+- `UI`: dense dashboard layout, glass styling, charts, settings and reusable components
 
-## 开发原则
+## Development Principles
 
-- 无硬编码模拟数据
-- 真实 API 数据优先
-- 低功耗和低唤醒优先
-- 明确区分“当前输入”“电池输出”“额定上限”“管理员估算”
-- 保持模块化，方便继续扩展更多面板与采样器
+- no mocked battery or power data
+- public or system-backed data sources first
+- low wake-up cost and lightweight background behavior
+- explicit distinction between rated power, current input and battery flow
+- modular architecture for future expansion
 
 ## Roadmap
 
-- 开机自启动配置
-- 电池事件时间线
-- 历史数据导出
-- 适配器异常与温度告警
-- 更多 Apple Silicon 平台适配验证
+- launch at login
+- battery event timeline
+- historical export
+- adapter mismatch and thermal alerts
+- broader Apple Silicon validation
 
-## 参与贡献
+## Contributing
 
-欢迎提交 Issue 和 PR。
-
-- 贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)
-- 安全问题见 [SECURITY.md](SECURITY.md)
+- contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- security policy: [SECURITY.md](SECURITY.md)
 
 ## License
 
-本项目采用 [MIT License](LICENSE) 开源。
+Released under the [MIT License](LICENSE).
