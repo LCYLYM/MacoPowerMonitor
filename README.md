@@ -17,7 +17,7 @@ Compact glass panel. No fake data.
 [![Swift](https://img.shields.io/badge/Swift-6.2-f05138?style=for-the-badge)](https://www.swift.org/)
 [![License](https://img.shields.io/github/license/LCYLYM/MacoPowerMonitor?style=for-the-badge)](LICENSE)
 
-[Download Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest) • [Direct ZIP Download](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest/download/MacoPowerMonitor-v0.1.0-macos.zip) • [Report Bug](https://github.com/LCYLYM/MacoPowerMonitor/issues/new?template=bug_report.md) • [Request Feature](https://github.com/LCYLYM/MacoPowerMonitor/issues/new?template=feature_request.md)
+[Download Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest) • [Direct ZIP Download](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest/download/MacoPowerMonitor-v0.2.0-macos.zip) • [Report Bug](https://github.com/LCYLYM/MacoPowerMonitor/issues/new?template=bug_report.md) • [Request Feature](https://github.com/LCYLYM/MacoPowerMonitor/issues/new?template=feature_request.md)
 
 </div>
 
@@ -68,7 +68,7 @@ It focuses on three things:
 #### Option 1: Download the app
 
 1. Open [Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest)
-2. Download `MacoPowerMonitor-v0.1.0-macos.zip`
+2. Download `MacoPowerMonitor-v0.2.0-macos.zip`
 3. Unzip it
 4. Move `MacoPowerMonitor.app` into `Applications`
 5. Launch the app and click the menu bar icon
@@ -220,7 +220,7 @@ Maco Power Monitor 是一个轻量级 macOS 状态栏电源监控工具，重点
 #### 方式一：直接下载应用
 
 1. 打开 [Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest)
-2. 下载 `MacoPowerMonitor-v0.1.0-macos.zip`
+2. 下载 `MacoPowerMonitor-v0.2.0-macos.zip`
 3. 解压
 4. 将 `MacoPowerMonitor.app` 移动到 `Applications`
 5. 打开应用并点击状态栏图标

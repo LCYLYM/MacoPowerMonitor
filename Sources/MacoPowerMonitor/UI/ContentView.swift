@@ -588,10 +588,44 @@ private struct SettingsView: View {
             .font(.system(size: 11))
             .foregroundStyle(PowerMonitorTheme.tertiary)
 
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("项目")
+                        .font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Text("v\(AppConstants.appVersion)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(PowerMonitorTheme.tertiary)
+                }
+
+                HStack(spacing: 10) {
+                    Button("GitHub") {
+                        AppControlActions.openRepository()
+                    }
+                    .buttonStyle(.bordered)
+                    .help("打开项目 GitHub 仓库。")
+
+                    Button("最新 Release") {
+                        AppControlActions.openLatestRelease()
+                    }
+                    .buttonStyle(.bordered)
+                    .help("打开最新版本下载页。")
+
+                    Spacer()
+
+                    Button("退出应用") {
+                        AppControlActions.quitApplication()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(PowerMonitorTheme.red)
+                    .help("退出状态栏应用并结束后台运行。")
+                }
+            }
+
             Spacer()
         }
         .padding(18)
-        .frame(width: 430, height: 420)
+        .frame(width: 430, height: 470)
     }
 }
 
