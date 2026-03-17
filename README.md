@@ -1,81 +1,106 @@
-# MacoPowerMonitor
+# Maco Power Monitor
 
-一个原生 macOS 状态栏电源监控小工具，目标是低开销、真实数据、可持续扩展。
+一个为 Apple Silicon Mac 设计的原生菜单栏电源监控工具。
 
-## 当前方案
+它专注做三件事：
 
-- 技术栈：`SwiftUI + MenuBarExtra + IOKit`
-- 运行形态：仅驻留在菜单栏，不依赖 Electron，不常驻 Dock
-- 数据来源：
-  - `IOPowerSources`：电量、充电状态、剩余时间、适配器基础信息
-  - `AppleSmartBattery` IORegistry：循环次数、设计容量、满充容量、电压、电流、温度、部分实时功率遥测
-- 刷新策略：每 30 秒采样一次，并带 5 秒容差，减少无意义唤醒
-- 历史缓存：保存到 `~/Library/Application Support/MacoPowerMonitor/power-history.json`
+- 用真实系统数据展示电量、充电、适配器和功耗状态
+- 保持低开销、轻量级的菜单栏常驻体验
+- 在紧凑面板里提供高信息密度的可视化与解释
 
-## 为什么这样做
+![Maco Power Monitor overview](docs/images/overview.png)
+![Maco Power Monitor charts](docs/images/charts.png)
 
-这类工具如果要非常轻量，最稳妥的路线就是用原生菜单栏应用：
+## 为什么值得安装
 
-- `MenuBarExtra` 非常适合状态栏弹出面板
-- `SwiftUI` 足够完成这种中小型信息密集型面板
-- `IOPowerSources` 是 Apple 提供的正式电源接口
-- `AppleSmartBattery` 能补到更多电池级硬件指标
+- 原生菜单栏应用。`SwiftUI + AppKit + IOKit`，不依赖 Electron 或 WebView。
+- 无虚拟数据。界面里的指标全部来自真实系统接口或系统命令输出。
+- 低干扰设计。驻留在状态栏，点击即看，不占 Dock，不打断当前工作流。
+- 信息密度高。把电量、输入功率、电池输出、回充、电流、健康度和会话信息集中在一个轻量面板里。
+- 真实可扩展。对拿不到的指标不造数，对需要管理员权限的 SoC 分项功耗明确说明并按需采样。
 
-相比 WebView/Electron，这个方案的内存和 CPU 占用会小很多，也更接近系统原生体验。
+## 功能亮点
 
-## 目前已实现
-
-- 菜单栏图标显示当前电量和充电状态
-- 点击状态栏图标可打开监控面板
-- 顶部摘要区显示：
-  - 预计剩余时间或预计充满时间
-  - 当前系统功率
-  - 当前电量
-- 1 小时历史图：
-  - 实时功耗
-  - 电池电量
-- 电池详细统计：
-  - 当前连接会话时长
-  - 会话期间电量变化
-  - 会话期间容量变化
-- 电池健康信息：
+- 状态栏图标显示当前电池状态，点击展开监控面板
+- 顶部摘要快速显示剩余时间、当前电量、系统输入、电池电流、适配器额定
+- 1 小时 / 24 小时 / 10 天趋势范围切换
+- `功耗 / 电量 / 电流` 多选显示，不需要反复切图
+- 功耗图同时展示：
+  - 系统输入
+  - 电池输出
+  - 电池回充
+- 电流图同时展示：
+  - 放电电流
+  - 充电电流
+- 电池详细数据：
   - 设计容量
   - 满充容量
-  - 循环次数
+  - 实际循环次数
   - 健康度
-- 实时电气指标：
-  - 系统输入功率
-  - 电池功率流
-  - 电池电压
-  - 电池电流
-  - 适配器功率
-  - 电池温度
-- 最近采样记录网格，全部基于真实样本渲染
+  - 电压
+  - 温度
+- 高耗电进程列表
+- 管理员模式下按需采样 CPU / GPU / ANE 分项功耗
 
-## 暂未实现的设计稿项
+## 数据来源
 
-设计稿里有 CPU / GPU / NPU 分项功耗，这一类数据在普通轻量菜单栏应用里并没有稳定的公开系统 API 可直接拿到。
+以下信息均来自 macOS 公开或系统级真实接口，没有模拟值：
 
-`powermetrics` 虽然在部分机器上可以输出估算的 SoC 分项功耗，但它更偏诊断工具，通常不适合作为默认无感常驻采样方案，原因包括：
+- `IOPowerSources` / `IOPSGetPowerSourceDescription`
+- `IOPSCopyExternalPowerAdapterDetails`
+- `ioreg -r -c AppleSmartBattery -a`
+- `system_profiler SPPowerDataType -json`
+- `top -l 1 -stats pid,command,cpu,mem,power`
+- `powermetrics`
+  - 仅在用户主动授权管理员采样时启用
+  - 用于补充 CPU / GPU / ANE 分项功耗
 
-- 某些更细采样需要更高权限
-- 本身就是估算值，不适合作为“精确硬件拆分”
-- 常驻频繁调用会违背“低消耗”目标
+## 截图说明
 
-所以当前版本不会用模拟数据去补这些卡片。拿不到的维度就不展示，保证界面上的每一项都来自真实系统读数。
+- README 里的截图来自真实运行中的应用界面
+- 图表中的数值和走势来自当前机器的真实电源样本
+- 透明背景为 macOS 菜单栏面板实际效果，不是设计稿拼图
 
-## 本地运行
+## 安装方式
 
-命令行运行：
+### 方式一：本地构建
+
+要求：
+
+- macOS 13 或更高版本
+- Xcode Command Line Tools 或完整 Xcode
+
+构建与运行：
 
 ```bash
 swift build
 swift run
 ```
 
-如果你的机器装了完整 Xcode，也可以直接用 Xcode 打开这个 Swift Package 调试。
+### 方式二：打包为 `.app`
 
-## 目录结构
+```bash
+./scripts/package_app.sh
+open dist/MacoPowerMonitor.app
+```
+
+## 权限与说明
+
+- 普通模式下，不需要管理员权限即可读取大部分电池、电源和适配器信息。
+- 更细的 SoC 分项功耗依赖 `powermetrics`，通常需要管理员授权。
+- 设置页里的“管理员采样”是按需触发，不会默认后台持续提权。
+- 适配器额定功率表示供电上限，不等于这一刻整机实际消耗。
+- 系统输入和电池输出是两个方向不同的概念，所以图表会分开显示。
+
+## 隐私与安全
+
+- 不上传遥测数据
+- 不接入第三方分析 SDK
+- 不发送任何设备信息到远端服务
+- 历史样本默认保存在本机：
+  - `~/Library/Application Support/MacoPowerMonitor/power-history.json`
+
+## 项目结构
 
 ```text
 Sources/MacoPowerMonitor/App
@@ -83,20 +108,39 @@ Sources/MacoPowerMonitor/Core
 Sources/MacoPowerMonitor/Services
 Sources/MacoPowerMonitor/Support
 Sources/MacoPowerMonitor/UI
+scripts
+docs/images
 ```
 
-说明：
+- `App`: 状态栏生命周期、面板与启动逻辑
+- `Core`: 核心模型与图表序列定义
+- `Services`: 系统采集、权限采样、历史存储、状态管理
+- `Support`: 常量、路径、格式化、调度器
+- `UI`: 面板布局、图表组件、玻璃化视觉和设置界面
 
-- `App`：应用入口和 AppKit 生命周期
-- `Core`：核心数据模型
-- `Services`：系统电源采集、历史存储、状态管理
-- `Support`：格式化、路径、调度器、常量
-- `UI`：菜单栏面板界面与组件
+## 开发原则
 
-## 下一步建议
+- 无硬编码模拟数据
+- 真实 API 数据优先
+- 低功耗和低唤醒优先
+- 明确区分“当前输入”“电池输出”“额定上限”“管理员估算”
+- 保持模块化，方便继续扩展更多面板与采样器
 
-- 增加设置页：刷新周期、启动时自动运行、图表窗口长度
-- 增加电池事件日志：接入/拔出电源、开始充电、充满
-- 增加导出能力：CSV/JSON 历史记录
-- 增加高级模式：显式开启后尝试接入 `powermetrics`
-- 增加异常提醒：温度过高、适配器功率不足、健康度下滑
+## Roadmap
+
+- 开机自启动配置
+- 电池事件时间线
+- 历史数据导出
+- 适配器异常与温度告警
+- 更多 Apple Silicon 平台适配验证
+
+## 参与贡献
+
+欢迎提交 Issue 和 PR。
+
+- 贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)
+- 安全问题见 [SECURITY.md](SECURITY.md)
+
+## License
+
+本项目采用 [MIT License](LICENSE) 开源。

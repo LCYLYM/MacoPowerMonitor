@@ -133,6 +133,32 @@ enum ChartMetric: String, CaseIterable, Identifiable {
             return "A"
         }
     }
+
+    var subtitle: String {
+        switch self {
+        case .power:
+            return "系统输入 + 电池输出/回充"
+        case .batteryLevel:
+            return "电池百分比走势"
+        case .chargeRate:
+            return "电池充电/放电电流"
+        }
+    }
+
+    func formatValue(_ value: Double?) -> String {
+        guard let value else {
+            return "--"
+        }
+
+        switch self {
+        case .power:
+            return String(format: "%.1fW", value)
+        case .batteryLevel:
+            return String(format: "%.0f%%", value)
+        case .chargeRate:
+            return String(format: "%.2fA", value)
+        }
+    }
 }
 
 enum ChartTimeRange: String, CaseIterable, Identifiable {
@@ -179,7 +205,55 @@ enum ChartTimeRange: String, CaseIterable, Identifiable {
 struct PowerChartPoint: Identifiable, Sendable {
     let timestamp: Date
     let value: Double
-    let isCharging: Bool
 
     var id: TimeInterval { timestamp.timeIntervalSinceReferenceDate }
+}
+
+enum PowerChartSeriesKind: String, CaseIterable, Identifiable, Sendable {
+    case systemInputPower
+    case batteryDischargePower
+    case batteryChargePower
+    case batteryDischargeCurrent
+    case batteryChargeCurrent
+    case batteryLevel
+
+    var id: String { rawValue }
+
+    var metric: ChartMetric {
+        switch self {
+        case .systemInputPower, .batteryDischargePower, .batteryChargePower:
+            return .power
+        case .batteryDischargeCurrent, .batteryChargeCurrent:
+            return .chargeRate
+        case .batteryLevel:
+            return .batteryLevel
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .systemInputPower:
+            return "系统输入"
+        case .batteryDischargePower:
+            return "电池输出"
+        case .batteryChargePower:
+            return "电池回充"
+        case .batteryDischargeCurrent:
+            return "放电电流"
+        case .batteryChargeCurrent:
+            return "充电电流"
+        case .batteryLevel:
+            return "电量"
+        }
+    }
+}
+
+struct PowerChartSeries: Identifiable, Sendable {
+    let id: PowerChartSeriesKind
+    let points: [PowerChartPoint]
+
+    var title: String { id.title }
+    var metric: ChartMetric { id.metric }
+    var latestValue: Double? { points.last?.value }
+    var hasData: Bool { !points.isEmpty }
 }

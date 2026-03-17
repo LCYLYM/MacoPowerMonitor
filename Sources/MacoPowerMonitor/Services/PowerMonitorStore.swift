@@ -77,7 +77,44 @@ final class PowerMonitorStore: ObservableObject {
         }
     }
 
-    func chartPoints(for metric: ChartMetric, range: ChartTimeRange) -> [PowerChartPoint] {
+    func chartSeries(for metric: ChartMetric, range: ChartTimeRange) -> [PowerChartSeries] {
+        let buckets = chartBuckets(for: range)
+        guard !buckets.isEmpty else {
+            return []
+        }
+
+        switch metric {
+        case .power:
+            return [
+                buildSeries(kind: .systemInputPower, buckets: buckets) { bucket in
+                    average(bucket.compactMap(\.systemPowerWatts).filter { $0 > 0.05 })
+                },
+                buildSeries(kind: .batteryDischargePower, buckets: buckets) { bucket in
+                    average(bucket.compactMap(\.batteryFlowWatts).filter { $0 < -0.05 }.map(abs))
+                },
+                buildSeries(kind: .batteryChargePower, buckets: buckets) { bucket in
+                    average(bucket.compactMap(\.batteryFlowWatts).filter { $0 > 0.05 })
+                },
+            ]
+        case .batteryLevel:
+            return [
+                buildSeries(kind: .batteryLevel, buckets: buckets) { bucket in
+                    average(bucket.map { $0.batteryLevel * 100.0 })
+                },
+            ]
+        case .chargeRate:
+            return [
+                buildSeries(kind: .batteryDischargeCurrent, buckets: buckets) { bucket in
+                    average(bucket.compactMap(\.amperageMilliamps).filter { $0 < 0 }.map { abs(Double($0)) / 1_000.0 })
+                },
+                buildSeries(kind: .batteryChargeCurrent, buckets: buckets) { bucket in
+                    average(bucket.compactMap(\.amperageMilliamps).filter { $0 > 0 }.map { Double($0) / 1_000.0 })
+                },
+            ]
+        }
+    }
+
+    private func chartBuckets(for range: ChartTimeRange) -> [(timestamp: Date, snapshots: [PowerSnapshot])] {
         let lowerBound = Date().addingTimeInterval(-range.interval)
         let samples = history.filter { $0.timestamp >= lowerBound }
 
@@ -86,7 +123,6 @@ final class PowerMonitorStore: ObservableObject {
         }
 
         let bucketWidth = range.interval / Double(range.bucketCount)
-        let calendar = Calendar.current
         var buckets: [[PowerSnapshot]] = Array(repeating: [], count: range.bucketCount)
 
         for sample in samples {
@@ -99,24 +135,35 @@ final class PowerMonitorStore: ObservableObject {
             guard !bucket.isEmpty else { return nil }
 
             let timestamp = lowerBound.addingTimeInterval((Double(index) + 0.5) * bucketWidth)
-            let isCharging = bucket.last?.isCharging ?? false
-            let value: Double?
+            return (
+                timestamp: timestamp,
+                snapshots: bucket
+            )
+        }
+    }
 
-            switch metric {
-            case .power:
-                let values = bucket.compactMap(\.preferredPowerWatts)
-                value = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
-            case .batteryLevel:
-                let values = bucket.map { $0.batteryLevel * 100.0 }
-                value = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
-            case .chargeRate:
-                let values = bucket.compactMap(\.amperageMilliamps).map { Double($0) / 1_000.0 }
-                value = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+    private func buildSeries(
+        kind: PowerChartSeriesKind,
+        buckets: [(timestamp: Date, snapshots: [PowerSnapshot])],
+        valueForBucket: ([PowerSnapshot]) -> Double?
+    ) -> PowerChartSeries {
+        let points = buckets.compactMap { bucket -> PowerChartPoint? in
+            guard let value = valueForBucket(bucket.snapshots) else {
+                return nil
             }
 
-            guard let value else { return nil }
-            return PowerChartPoint(timestamp: calendar.date(bySettingHour: calendar.component(.hour, from: timestamp), minute: calendar.component(.minute, from: timestamp), second: 0, of: timestamp) ?? timestamp, value: value, isCharging: isCharging)
+            return PowerChartPoint(timestamp: bucket.timestamp, value: value)
         }
+
+        return PowerChartSeries(id: kind, points: points)
+    }
+
+    private func average(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else {
+            return nil
+        }
+
+        return values.reduce(0, +) / Double(values.count)
     }
 
     func recentSnapshots(limit: Int) -> [PowerSnapshot] {

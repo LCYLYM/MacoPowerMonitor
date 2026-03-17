@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var store: PowerMonitorStore
-    @State private var selectedMetric: ChartMetric = .batteryLevel
+    @State private var selectedChartMetrics: Set<ChartMetric> = Set(ChartMetric.allCases)
     @State private var selectedRange: ChartTimeRange = .twentyFourHours
     @State private var showingSettings = false
 
@@ -119,25 +119,21 @@ struct ContentView: View {
     }
 
     private var chartSection: some View {
-        let points = store.chartPoints(for: selectedMetric, range: selectedRange)
+        let visibleMetrics = ChartMetric.allCases.filter { selectedChartMetrics.contains($0) }
 
         return SectionCard(title: "趋势图") {
             VStack(spacing: 7) {
                 CompactSegmentedControl(selection: $selectedRange, items: ChartTimeRange.allCases)
-                CompactSegmentedControl(selection: $selectedMetric, items: [ChartMetric.power, .batteryLevel, .chargeRate])
+                metricSelectionRow
 
-                HStack {
-                    Text(chartTitle)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(PowerMonitorTheme.secondary)
-                    Spacer()
-                    Text(chartValue(points))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(PowerMonitorTheme.tertiary)
+                ForEach(Array(visibleMetrics.enumerated()), id: \.element) { index, metric in
+                    MetricTrendSection(
+                        metric: metric,
+                        series: store.chartSeries(for: metric, range: selectedRange),
+                        range: selectedRange,
+                        showsXAxis: index == visibleMetrics.count - 1
+                    )
                 }
-
-                PowerTrendChart(points: points, metric: selectedMetric, range: selectedRange)
-                    .help(chartHelpText)
             }
         }
     }
@@ -252,25 +248,40 @@ struct ContentView: View {
         return "预计剩余时间"
     }
 
-    private var chartTitle: String {
-        switch selectedMetric {
-        case .power:
-            return "整机输入功率"
-        case .batteryLevel:
-            return "电池电量"
-        case .chargeRate:
-            return "电池电流"
+    private var metricSelectionRow: some View {
+        HStack(spacing: 4) {
+            ForEach(ChartMetric.allCases) { metric in
+                Button {
+                    toggleChartMetric(metric)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: selectedChartMetrics.contains(metric) ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(metric.title)
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(selectedChartMetrics.contains(metric) ? .white : PowerMonitorTheme.tertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(selectedChartMetrics.contains(metric) ? PowerMonitorTheme.accent : Color.white.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .padding(4)
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .help("勾选后会在同一时间范围内同时显示多个指标，不再来回切换。")
     }
 
-    private var chartHelpText: String {
-        switch selectedMetric {
-        case .power:
-            return "整机输入功率变化图，帮助判断高负载时段。"
-        case .batteryLevel:
-            return "电池电量历史图，帮助理解在不同时间范围内电量涨跌。"
-        case .chargeRate:
-            return "电池电流变化图，帮助判断充电/放电强度。"
+    private func toggleChartMetric(_ metric: ChartMetric) {
+        if selectedChartMetrics.contains(metric) {
+            if selectedChartMetrics.count > 1 {
+                selectedChartMetrics.remove(metric)
+            }
+        } else {
+            selectedChartMetrics.insert(metric)
         }
     }
 
@@ -283,21 +294,6 @@ struct ContentView: View {
         }
 
         return "需授权"
-    }
-
-    private func chartValue(_ points: [PowerChartPoint]) -> String {
-        guard let latest = points.last?.value else {
-            return "--"
-        }
-
-        switch selectedMetric {
-        case .power:
-            return String(format: "%.1f W", latest)
-        case .batteryLevel:
-            return String(format: "%.0f%%", latest)
-        case .chargeRate:
-            return String(format: "%.2f A", latest)
-        }
     }
 }
 
@@ -347,6 +343,110 @@ private struct CompactSegmentedControl<Item: Identifiable & Hashable>: View wher
         .padding(4)
         .background(Color.white.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private struct MetricTrendSection: View {
+    let metric: ChartMetric
+    let series: [PowerChartSeries]
+    let range: ChartTimeRange
+    let showsXAxis: Bool
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(metric.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PowerMonitorTheme.secondary)
+                    Text(metric.subtitle)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(PowerMonitorTheme.muted)
+                }
+
+                Spacer()
+
+                Text(metricHelpLabel)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(PowerMonitorTheme.tertiary)
+            }
+
+            HStack(spacing: 4) {
+                ForEach(series) { series in
+                    ChartSeriesValuePill(series: series)
+                }
+            }
+
+            PowerTrendChart(series: series, metric: metric, range: range, showsXAxis: showsXAxis)
+                .help(metricHelpText)
+        }
+        .padding(8)
+        .background(Color.white.opacity(0.045))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var metricHelpLabel: String {
+        switch metric {
+        case .power:
+            return "输入 / 输出"
+        case .batteryLevel:
+            return "剩余容量"
+        case .chargeRate:
+            return "充 / 放电"
+        }
+    }
+
+    private var metricHelpText: String {
+        switch metric {
+        case .power:
+            return "同时显示系统输入、电池输出和电池回充，便于看清功率到底从哪里来、流向哪里去。"
+        case .batteryLevel:
+            return "显示电池百分比变化，和功耗、电流时间轴保持一致。"
+        case .chargeRate:
+            return "同时显示充电电流和放电电流，避免把正负方向混在一条线上。"
+        }
+    }
+}
+
+private struct ChartSeriesValuePill: View {
+    let series: PowerChartSeries
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(indicatorColor)
+                    .frame(width: 6, height: 6)
+                Text(series.title)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(PowerMonitorTheme.muted)
+            }
+            Text(series.metric.formatValue(series.latestValue))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(PowerMonitorTheme.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 6)
+        .background(Color.white.opacity(0.045))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var indicatorColor: Color {
+        switch series.id {
+        case .systemInputPower, .batteryLevel:
+            return PowerMonitorTheme.accent
+        case .batteryDischargePower:
+            return Color(red: 1.00, green: 0.66, blue: 0.21)
+        case .batteryChargePower:
+            return PowerMonitorTheme.green
+        case .batteryDischargeCurrent:
+            return PowerMonitorTheme.red
+        case .batteryChargeCurrent:
+            return Color(red: 0.26, green: 0.78, blue: 0.94)
+        }
     }
 }
 

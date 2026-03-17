@@ -1,25 +1,24 @@
 import AppKit
 import Combine
+import OSLog
 import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = PowerMonitorStore.shared
+    private let logger = Logger(subsystem: AppConstants.subsystem, category: "app")
     private var statusItem: NSStatusItem?
     private var panel: NSPanel?
     private var cancellables = Set<AnyCancellable>()
     private var globalMonitor: Any?
     private var localMonitor: Any?
+    private var statusItemConfigurationAttempts = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        configureStatusItem()
         configureObservers()
-
-        if ProcessInfo.processInfo.environment["MACO_POWER_MONITOR_DEBUG_WINDOW"] == "1" {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.showPanel()
-            }
+        DispatchQueue.main.async { [weak self] in
+            self?.configureStatusItemIfNeeded()
         }
     }
 
@@ -32,14 +31,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func configureStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.target = self
-        item.button?.action = #selector(togglePanelFromStatusItem)
-        item.button?.sendAction(on: [.leftMouseUp])
-        item.button?.font = .systemFont(ofSize: 12, weight: .semibold)
+    private func configureStatusItemIfNeeded() {
+        statusItemConfigurationAttempts += 1
+
+        if let existingItem = statusItem {
+            if existingItem.button != nil {
+                existingItem.isVisible = true
+                updateStatusItem(snapshot: store.latestSnapshot)
+                logger.notice("Status item became available on attempt \(self.statusItemConfigurationAttempts, privacy: .public)")
+                return
+            }
+
+            NSStatusBar.system.removeStatusItem(existingItem)
+            statusItem = nil
+        }
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.isVisible = true
+
+        guard let button = item.button else {
+            logger.error("Failed to create status item button on attempt \(self.statusItemConfigurationAttempts, privacy: .public)")
+            scheduleStatusItemRetryIfNeeded()
+            return
+        }
+
+        button.target = self
+        button.action = #selector(togglePanelFromStatusItem)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
+        button.title = ""
         statusItem = item
+        logger.notice("Configured status item on attempt \(self.statusItemConfigurationAttempts, privacy: .public)")
         updateStatusItem(snapshot: store.latestSnapshot)
+
+        if ProcessInfo.processInfo.environment["MACO_POWER_MONITOR_DEBUG_WINDOW"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.showPanel()
+            }
+        }
+    }
+
+    private func scheduleStatusItemRetryIfNeeded() {
+        guard statusItemConfigurationAttempts < 6 else {
+            logger.fault("Giving up after repeated status item creation failures")
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.configureStatusItemIfNeeded()
+        }
     }
 
     private func configureObservers() {
@@ -55,32 +96,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button else { return }
 
         let symbolName: String
-        let title: String
 
         if let snapshot {
             if snapshot.isCharging {
-                symbolName = "bolt.batteryblock.fill"
+                symbolName = "battery.100percent.bolt"
             } else {
                 switch snapshot.batteryLevel {
-                case ..<0.15: symbolName = "battery.0"
-                case ..<0.35: symbolName = "battery.25"
-                case ..<0.60: symbolName = "battery.50"
-                case ..<0.85: symbolName = "battery.75"
-                default: symbolName = "battery.100"
+                case ..<0.15: symbolName = "battery.25percent"
+                case ..<0.35: symbolName = "battery.25percent"
+                case ..<0.60: symbolName = "battery.50percent"
+                case ..<0.85: symbolName = "battery.75percent"
+                default: symbolName = "battery.100percent"
                 }
             }
-
-            title = PowerFormatting.percent(snapshot.batteryLevel)
         } else {
-            symbolName = "battery.0"
-            title = "--%"
+            symbolName = "battery.0percent"
         }
 
-        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Power Monitor")
-        button.imagePosition = .imageLeading
-        button.title = title
+        let resolvedSymbolName: String
+        if NSImage(systemSymbolName: symbolName, accessibilityDescription: "Power Monitor") != nil {
+            resolvedSymbolName = symbolName
+        } else {
+            resolvedSymbolName = "battery.100percent"
+        }
+
+        let image = NSImage(systemSymbolName: resolvedSymbolName, accessibilityDescription: "Power Monitor")
+        image?.isTemplate = true
+        button.image = image
+        button.appearsDisabled = false
         button.toolTip = snapshot.map {
-            "电量 \(PowerFormatting.percent($0.batteryLevel)) · \($0.displayStatusText) · \(PowerFormatting.watts($0.preferredPowerWatts))"
+            "电量 \(PowerFormatting.percent($0.batteryLevel)) · \($0.displayStatusText) · 系统输入 \(PowerFormatting.watts($0.systemPowerWatts))"
         } ?? "正在读取电源信息"
     }
 
@@ -95,11 +140,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showPanel() {
         let panel = ensurePanel()
-        guard let button = statusItem?.button else { return }
-
-        position(panel: panel, relativeTo: button)
-        panel.orderFrontRegardless()
-        panel.makeKey()
+        if let button = statusItem?.button {
+            position(panel: panel, relativeTo: button)
+        } else {
+            logger.warning("Showing panel without status item button; using fallback positioning")
+            positionFallback(panel: panel)
+        }
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
         startEventMonitors()
     }
 
@@ -140,6 +188,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setFrame(NSRect(x: x, y: y, width: AppConstants.panelWidth, height: AppConstants.panelHeight), display: true)
     }
 
+    private func positionFallback(panel: NSPanel) {
+        let visibleFrame = NSScreen.main?.visibleFrame ?? .zero
+        let x = max(visibleFrame.maxX - AppConstants.panelWidth - 12, visibleFrame.minX + 8)
+        let y = max(visibleFrame.maxY - AppConstants.panelHeight - 24, visibleFrame.minY + 8)
+        panel.setFrame(NSRect(x: x, y: y, width: AppConstants.panelWidth, height: AppConstants.panelHeight), display: true)
+    }
+
     private func startEventMonitors() {
         stopEventMonitors()
 
@@ -156,11 +211,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
 
-            if let panel = self.panel, panel.isVisible, let eventWindow = event.window, eventWindow != panel {
+            if let panel = self.panel, panel.isVisible, !self.belongsToPanelHierarchy(event.window) {
                 self.closePanel()
             }
             return event
         }
+    }
+
+    private func belongsToPanelHierarchy(_ window: NSWindow?) -> Bool {
+        guard let panel, let window else {
+            return false
+        }
+
+        var currentWindow: NSWindow? = window
+        var visitedWindowNumbers = Set<Int>()
+
+        while let resolvedWindow = currentWindow {
+            if resolvedWindow == panel {
+                return true
+            }
+
+            if !visitedWindowNumbers.insert(resolvedWindow.windowNumber).inserted {
+                break
+            }
+
+            currentWindow = resolvedWindow.sheetParent ?? resolvedWindow.parent
+        }
+
+        return panel.childWindows?.contains(where: { $0 == window }) ?? false
     }
 
     private func stopEventMonitors() {
