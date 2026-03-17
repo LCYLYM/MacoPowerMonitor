@@ -15,6 +15,8 @@ final class PowerMonitorStore: ObservableObject {
     private static let maxHistoryAge: TimeInterval = 60 * 60 * 24
     private static let maxHistoryCount = 2_880
 
+    static let shared = PowerMonitorStore.live()
+
     static func live() -> PowerMonitorStore {
         PowerMonitorStore(
             collector: SystemPowerSnapshotCollector(),
@@ -110,15 +112,6 @@ final class PowerMonitorStore: ObservableObject {
         }
 
         let deltaPercent = (latestSnapshot.batteryLevel - earliest.batteryLevel) * 100.0
-        let deltaMah: Int?
-
-        if let latestCapacity = latestSnapshot.currentCapacityMah,
-           let earliestCapacity = earliest.currentCapacityMah {
-            deltaMah = latestCapacity - earliestCapacity
-        } else {
-            deltaMah = nil
-        }
-
         let title: String
         switch latestSnapshot.source {
         case .battery:
@@ -136,7 +129,7 @@ final class PowerMonitorStore: ObservableObject {
             startedAt: earliest.timestamp,
             elapsed: latestSnapshot.timestamp.timeIntervalSince(earliest.timestamp),
             batteryPercentDelta: deltaPercent,
-            capacityDeltaMah: deltaMah
+            capacityDeltaMah: nil
         )
     }
 

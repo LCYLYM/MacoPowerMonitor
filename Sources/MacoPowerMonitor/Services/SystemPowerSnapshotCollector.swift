@@ -1,5 +1,4 @@
 import Foundation
-import IOKit
 import IOKit.ps
 import OSLog
 
@@ -8,7 +7,6 @@ struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
 
     func readSnapshot() throws -> PowerSnapshot {
         let sourceDescription = try readPrimaryPowerSource()
-        let registry = try readBatteryRegistry()
         let adapter = readAdapterDetails()
         let batteryHealthCondition = sourceDescription.stringValue(forCKey: kIOPSBatteryHealthConditionKey)
         let batteryHealthState = sourceDescription.stringValue(forCKey: kIOPSBatteryHealthKey)
@@ -25,18 +23,9 @@ struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
             source = .unknown
         }
 
-        let iopsVoltage = sourceDescription.intValue(forCKey: kIOPSVoltageKey)
-        let iopsCurrent = sourceDescription.intValue(forCKey: kIOPSCurrentKey)
-        let rawTemperature = sourceDescription.intValue(forCKey: kIOPSTemperatureKey) ?? registry.int("Temperature")
-
-        let telemetrySystemPower = registry.double(path: ["PowerTelemetryData", "SystemPowerIn"]).map { $0 / 1_000.0 }
-        let batteryDataSystemPower = registry.double(path: ["BatteryData", "SystemPower"])
-        let derivedSystemPower = telemetrySystemPower ?? batteryDataSystemPower
-
-        let telemetryBatteryPower = registry.double(path: ["PowerTelemetryData", "BatteryPower"]).map { $0 / 1_000.0 }
-        let amperage = registry.int("Amperage") ?? iopsCurrent
-        let voltage = registry.int("Voltage") ?? iopsVoltage
-        let derivedBatteryPower = telemetryBatteryPower ?? SystemPowerSnapshotCollector.powerFrom(voltageMillivolts: voltage, amperageMilliamps: amperage)
+        let voltage = sourceDescription.intValue(forCKey: kIOPSVoltageKey)
+        let current = sourceDescription.intValue(forCKey: kIOPSCurrentKey)
+        let temperature = normalizeTemperature(sourceDescription.intValue(forCKey: kIOPSTemperatureKey))
 
         let currentCapacityPercent = sourceDescription.doubleValue(forCKey: kIOPSCurrentCapacityKey)
         let maxPercentCapacity = sourceDescription.doubleValue(forCKey: kIOPSMaxCapacityKey)
@@ -48,30 +37,42 @@ struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
             return min(max(currentCapacityPercent / maxPercentCapacity, 0.0), 1.0)
         }()
 
+        let adapterWatts = adapter.intValue(forCKey: kIOPSPowerAdapterWattsKey)
+        let adapterCurrent = adapter.intValue(forCKey: kIOPSPowerAdapterCurrentKey)
+        let adapterVoltage = adapter.intValue(forKey: "AdapterVoltage")
+        let batteryPower = Self.powerFrom(voltageMillivolts: voltage, amperageMilliamps: current)
+
+        let systemPower: Double?
+        if let adapterWatts, source == .acPower {
+            systemPower = Double(adapterWatts)
+        } else {
+            systemPower = batteryPower.map(abs)
+        }
+
         let snapshot = PowerSnapshot(
             timestamp: Date(),
             source: source,
             batteryName: sourceDescription.stringValue(forCKey: kIOPSNameKey),
             batteryLevel: batteryLevel,
             currentChargePercent: currentCapacityPercent,
-            currentCapacityMah: registry.int("AppleRawCurrentCapacity"),
-            maxCapacityMah: registry.int("AppleRawMaxCapacity") ?? registry.int("MaxCapacity"),
-            designCapacityMah: registry.int("DesignCapacity"),
-            cycleCount: registry.int("CycleCount"),
+            nominalCapacity: sourceDescription.intValue(forCKey: kIOPSNominalCapacityKey),
+            designCapacity: sourceDescription.intValue(forCKey: kIOPSDesignCapacityKey),
+            designCycleCount: sourceDescription.intValue(forKey: "DesignCycleCount"),
+            hardwareSerialNumber: sourceDescription.stringValue(forCKey: kIOPSHardwareSerialNumberKey),
             isCharging: sourceDescription.boolValue(forCKey: kIOPSIsChargingKey),
             isCharged: sourceDescription.boolValue(forCKey: kIOPSIsChargedKey),
             timeToEmptyMinutes: normalized(minutes: sourceDescription.intValue(forCKey: kIOPSTimeToEmptyKey) ?? timeRemainingEstimate(for: source)),
             timeToFullChargeMinutes: normalized(minutes: sourceDescription.intValue(forCKey: kIOPSTimeToFullChargeKey)),
             voltageMillivolts: voltage,
-            amperageMilliamps: amperage,
-            temperatureCelsius: normalizeTemperature(rawTemperature),
+            amperageMilliamps: current,
+            temperatureCelsius: temperature,
             batteryHealthCondition: batteryHealthCondition,
             batteryHealthState: batteryHealthState,
-            adapterWatts: adapter.intValue(forCKey: kIOPSPowerAdapterWattsKey),
-            adapterVoltageMillivolts: adapter.intValue(forCKey: kIOPSPowerAdapterCurrentKey) == nil ? nil : registry.int(path: ["AdapterDetails", "AdapterVoltage"]) ?? adapter.intValue(forKey: "AdapterVoltage"),
-            adapterCurrentMilliamps: adapter.intValue(forCKey: kIOPSPowerAdapterCurrentKey),
-            systemPowerWatts: derivedSystemPower,
-            batteryPowerWatts: derivedBatteryPower
+            adapterWatts: adapterWatts,
+            adapterVoltageMillivolts: adapterVoltage,
+            adapterCurrentMilliamps: adapterCurrent,
+            systemPowerWatts: systemPower,
+            batteryPowerWatts: batteryPower
         )
 
         logger.debug("Captured power snapshot at \(snapshot.timestamp, privacy: .public)")
@@ -113,25 +114,6 @@ struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
         return details
     }
 
-    private func readBatteryRegistry() throws -> RegistrySnapshot {
-        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
-        guard service != 0 else {
-            return RegistrySnapshot(properties: [:])
-        }
-
-        defer { IOObjectRelease(service) }
-
-        var unmanagedProperties: Unmanaged<CFMutableDictionary>?
-        let result = IORegistryEntryCreateCFProperties(service, &unmanagedProperties, kCFAllocatorDefault, 0)
-
-        guard result == KERN_SUCCESS,
-              let dictionary = unmanagedProperties?.takeRetainedValue() as? [String: Any] else {
-            throw PowerSnapshotCollectorError.unableToReadRegistryProperties
-        }
-
-        return RegistrySnapshot(properties: dictionary)
-    }
-
     private func timeRemainingEstimate(for source: PowerSourceKind) -> Int? {
         guard source == .battery else {
             return nil
@@ -171,48 +153,6 @@ struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
         }
 
         return Double(voltageMillivolts * amperageMilliamps) / 1_000_000.0
-    }
-}
-
-private struct RegistrySnapshot {
-    let properties: [String: Any]
-
-    func int(_ key: String) -> Int? {
-        properties[key] as? Int
-    }
-
-    func int(path: [String]) -> Int? {
-        value(path: path) as? Int
-    }
-
-    func double(path: [String]) -> Double? {
-        if let value = value(path: path) as? Double {
-            return value
-        }
-
-        if let value = value(path: path) as? Int {
-            return Double(value)
-        }
-
-        return nil
-    }
-
-    private func value(path: [String]) -> Any? {
-        guard let first = path.first else {
-            return nil
-        }
-
-        var current: Any? = properties[first]
-
-        for key in path.dropFirst() {
-            guard let dictionary = current as? [String: Any] else {
-                return nil
-            }
-
-            current = dictionary[key]
-        }
-
-        return current
     }
 }
 

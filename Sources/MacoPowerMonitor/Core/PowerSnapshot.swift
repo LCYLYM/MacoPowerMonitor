@@ -12,10 +12,10 @@ struct PowerSnapshot: Codable, Equatable, Sendable {
     let batteryName: String?
     let batteryLevel: Double
     let currentChargePercent: Double?
-    let currentCapacityMah: Int?
-    let maxCapacityMah: Int?
-    let designCapacityMah: Int?
-    let cycleCount: Int?
+    let nominalCapacity: Int?
+    let designCapacity: Int?
+    let designCycleCount: Int?
+    let hardwareSerialNumber: String?
     let isCharging: Bool
     let isCharged: Bool
     let timeToEmptyMinutes: Int?
@@ -48,11 +48,11 @@ struct PowerSnapshot: Codable, Equatable, Sendable {
     }
 
     var batteryHealthRatio: Double? {
-        guard let designCapacityMah, let maxCapacityMah, designCapacityMah > 0 else {
+        guard let designCapacity, let nominalCapacity, designCapacity > 0 else {
             return nil
         }
 
-        return Double(maxCapacityMah) / Double(designCapacityMah)
+        return Double(nominalCapacity) / Double(designCapacity)
     }
 
     var displayStatusText: String {

@@ -23,6 +23,13 @@ enum PowerFormatting {
         return "\(minutes)m"
     }
 
+    static func clockTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+
     static func relativeUpdateTime(from date: Date) -> String {
         let seconds = max(Int(Date().timeIntervalSince(date)), 0)
 

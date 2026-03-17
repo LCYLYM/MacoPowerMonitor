@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var store: PowerMonitorStore
-    @State private var selectedMetric: ChartMetric = .power
+    @State private var selectedMetric: ChartMetric = .batteryLevel
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -117,7 +117,7 @@ struct ContentView: View {
 
                     HStack {
                         SessionDeltaView(label: "电量变化", value: PowerFormatting.signedPercent(session.batteryPercentDelta))
-                        SessionDeltaView(label: "容量变化", value: PowerFormatting.signedCapacity(session.capacityDeltaMah))
+                        SessionDeltaView(label: "开始时间", value: PowerFormatting.clockTime(session.startedAt))
                     }
                 }
             } else {
@@ -131,9 +131,9 @@ struct ContentView: View {
             let snapshot = store.latestSnapshot
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                DetailMetricCard(title: "设计容量", value: PowerFormatting.milliampHours(snapshot?.designCapacityMah))
-                DetailMetricCard(title: "满充容量", value: PowerFormatting.milliampHours(snapshot?.maxCapacityMah))
-                DetailMetricCard(title: "循环次数", value: snapshot?.cycleCount.map(String.init) ?? "--")
+                DetailMetricCard(title: "设计容量", value: PowerFormatting.milliampHours(snapshot?.designCapacity))
+                DetailMetricCard(title: "标称满充", value: PowerFormatting.milliampHours(snapshot?.nominalCapacity))
+                DetailMetricCard(title: "设计循环上限", value: snapshot?.designCycleCount.map(String.init) ?? "--")
                 DetailMetricCard(title: "健康度", value: PowerFormatting.health(snapshot?.batteryHealthRatio))
             }
 
@@ -153,13 +153,13 @@ struct ContentView: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text("预计时长")
+                    Text("电池序列")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.45))
-                    Text(headerTime)
-                        .font(.system(size: 18, weight: .medium, design: .rounded))
+                    Text(snapshot?.hardwareSerialNumber ?? "不可用")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(PowerMonitorTheme.accent)
-                        .monospacedDigit()
+                        .lineLimit(1)
                 }
             }
         }
@@ -173,7 +173,7 @@ struct ContentView: View {
                 DetailMetricCard(title: "电池电压", value: PowerFormatting.volts(fromMillivolts: store.latestSnapshot?.voltageMillivolts))
                 DetailMetricCard(title: "电池电流", value: PowerFormatting.amps(fromMilliamps: store.latestSnapshot?.amperageMilliamps))
                 DetailMetricCard(title: "适配器功率", value: store.latestSnapshot?.adapterWatts.map { "\($0) W" } ?? "-- W")
-                DetailMetricCard(title: "电池温度", value: PowerFormatting.temperature(store.latestSnapshot?.temperatureCelsius))
+                DetailMetricCard(title: "适配器电流", value: PowerFormatting.amps(fromMilliamps: store.latestSnapshot?.adapterCurrentMilliamps))
             }
         }
     }
@@ -196,7 +196,7 @@ struct ContentView: View {
                 Text("数据源")
                     .foregroundStyle(.white.opacity(0.45))
                 Spacer()
-                Text("IOPowerSources + AppleSmartBattery")
+                Text("IOPowerSources + AC Adapter Details")
                     .foregroundStyle(.white.opacity(0.82))
             }
 

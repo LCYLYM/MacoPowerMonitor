@@ -6,7 +6,7 @@ struct MacoPowerMonitorApp: App {
     @StateObject private var store: PowerMonitorStore
 
     init() {
-        _store = StateObject(wrappedValue: PowerMonitorStore.live())
+        _store = StateObject(wrappedValue: PowerMonitorStore.shared)
     }
 
     var body: some Scene {
