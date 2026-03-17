@@ -87,7 +87,7 @@ struct PowerTrendChart: View {
             }
             .chartPlotStyle { plot in
                 plot
-                    .frame(height: 168)
+                    .frame(height: 118)
                     .background(Color.white.opacity(0.035))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }

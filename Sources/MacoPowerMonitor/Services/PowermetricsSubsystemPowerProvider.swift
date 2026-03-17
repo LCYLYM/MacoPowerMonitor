@@ -10,6 +10,7 @@ struct SubsystemPowerMetrics: Sendable {
 
 final class PowermetricsSubsystemPowerProvider: @unchecked Sendable {
     static let shared = PowermetricsSubsystemPowerProvider()
+    static let autoAttemptDefaultsKey = "powermetrics.autoAttempt"
 
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "powermetrics")
     private let queue = DispatchQueue(label: "com.codex.MacoPowerMonitor.powermetrics")
@@ -22,6 +23,17 @@ final class PowermetricsSubsystemPowerProvider: @unchecked Sendable {
             let now = Date()
             if let lastRefreshDate,
                now.timeIntervalSince(lastRefreshDate) < refreshInterval {
+                return cachedMetrics
+            }
+
+            guard UserDefaults.standard.bool(forKey: Self.autoAttemptDefaultsKey) else {
+                cachedMetrics = SubsystemPowerMetrics(
+                    cpuWatts: nil,
+                    gpuWatts: nil,
+                    aneWatts: nil,
+                    unavailableReason: "在设置中启用自动尝试或手动进行管理员采样"
+                )
+                lastRefreshDate = now
                 return cachedMetrics
             }
 
@@ -42,12 +54,34 @@ final class PowermetricsSubsystemPowerProvider: @unchecked Sendable {
         }
     }
 
+    func refreshInteractively() throws -> SubsystemPowerMetrics {
+        let appleScript = """
+        do shell script "/usr/bin/powermetrics --samplers cpu_power,gpu_power,ane_power -n 1 -f plist | /usr/bin/base64" with administrator privileges
+        """
+        let data = try CommandRunner.run(executable: "/usr/bin/osascript", arguments: ["-e", appleScript])
+        let base64 = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let decoded = Data(base64Encoded: base64) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        let metrics = try parseMetrics(from: decoded)
+        queue.sync {
+            cachedMetrics = metrics
+            lastRefreshDate = Date()
+        }
+        return metrics
+    }
+
     private func fetchMetrics() throws -> SubsystemPowerMetrics {
         let data = try CommandRunner.run(
             executable: "/usr/bin/sudo",
             arguments: ["-n", "/usr/bin/powermetrics", "--samplers", "cpu_power,gpu_power,ane_power", "-n", "1", "-f", "plist"]
         )
 
+        return try parseMetrics(from: data)
+    }
+
+    private func parseMetrics(from data: Data) throws -> SubsystemPowerMetrics {
         let chunks = data.split(separator: 0)
         guard let first = chunks.first,
               let plist = try PropertyListSerialization.propertyList(from: Data(first), options: [], format: nil) as? [String: Any] else {

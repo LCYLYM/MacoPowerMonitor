@@ -4,6 +4,7 @@ struct ContentView: View {
     @ObservedObject var store: PowerMonitorStore
     @State private var selectedMetric: ChartMetric = .batteryLevel
     @State private var selectedRange: ChartTimeRange = .twentyFourHours
+    @State private var showingSettings = false
 
     var body: some View {
         ZStack {
@@ -22,25 +23,23 @@ struct ContentView: View {
                         .strokeBorder(Color.white.opacity(0.12))
                 )
 
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 10) {
-                    headerSection
-                    chartSection
-                    quickInfoSection
-                    activitySection
-                    subsystemSection
-                    batteryHealthSection
-                    footerSection
-                }
-                .padding(12)
+            VStack(spacing: 8) {
+                headerSection
+                chartSection
+                summaryGridSection
+                processSection
+                footerSection
             }
+            .padding(10)
         }
         .frame(width: AppConstants.panelWidth)
-        .compositingGroup()
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(store: store)
+        }
     }
 
     private var headerSection: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             HStack {
                 Image(systemName: "menubar.dock.rectangle")
                     .foregroundStyle(PowerMonitorTheme.tertiary)
@@ -48,53 +47,68 @@ struct ContentView: View {
                 Spacer()
 
                 Text("电源监控")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.white)
 
                 Spacer()
 
-                Button {
-                    store.refreshNow()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .foregroundStyle(PowerMonitorTheme.tertiary)
+                HStack(spacing: 10) {
+                    Button {
+                        store.refreshNow()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(PowerMonitorTheme.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("立即刷新当前电源数据。")
+
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .foregroundStyle(PowerMonitorTheme.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("打开设置。")
                 }
-                .buttonStyle(.plain)
             }
 
             HStack(alignment: .bottom, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(headerTime)
-                        .font(.system(size: 34, weight: .light, design: .rounded))
+                        .font(.system(size: 30, weight: .light, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
-
                     Text(headerSubtitle)
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(1.8)
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(1.6)
                         .foregroundStyle(PowerMonitorTheme.accent)
+                        .help("充电时显示预计充满时间，放电时显示预计剩余使用时间。")
                 }
 
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 2) {
                     Text(store.latestSnapshot.map { PowerFormatting.percent($0.batteryLevel) } ?? "--%")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .font(.system(size: 25, weight: .bold, design: .rounded))
                         .foregroundStyle(PowerMonitorTheme.green)
                         .monospacedDigit()
                     Text(store.latestSnapshot?.displayStatusText ?? "等待采样")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(PowerMonitorTheme.tertiary)
                 }
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 HeaderCapsule(title: "系统输入", value: PowerFormatting.watts(store.latestSnapshot?.systemPowerWatts))
+                    .help("当前整机输入功率，反映系统这一刻大概正在消耗多少功率。")
                 HeaderCapsule(title: "电池电流", value: PowerFormatting.amps(fromMilliamps: store.latestSnapshot?.amperageMilliamps))
-                HeaderCapsule(title: "适配器", value: store.latestSnapshot?.adapterWatts.map { "\($0)W" } ?? "--")
+                    .help("电池侧即时电流。")
+                HeaderCapsule(title: "适配器额定", value: store.latestSnapshot?.adapterWatts.map { "\($0)W" } ?? "--")
+                    .help("适配器协商到的最大供电能力。本机当前是 65W，不代表系统此刻真的用到 65W。")
             }
         }
-        .padding(12)
+        .padding(10)
         .background(PowerMonitorTheme.cardBackground)
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(PowerMonitorTheme.cardBorder))
         .clipShape(RoundedRectangle(cornerRadius: 18))
@@ -103,132 +117,107 @@ struct ContentView: View {
     private var chartSection: some View {
         let points = store.chartPoints(for: selectedMetric, range: selectedRange)
 
-        return SectionCard(title: "历史趋势") {
-            VStack(spacing: 8) {
+        return SectionCard(title: "趋势图") {
+            VStack(spacing: 7) {
                 CompactSegmentedControl(selection: $selectedRange, items: ChartTimeRange.allCases)
-                CompactSegmentedControl(selection: $selectedMetric, items: ChartMetric.allCases)
+                CompactSegmentedControl(selection: $selectedMetric, items: [ChartMetric.power, .batteryLevel, .chargeRate])
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(chartSummaryTitle)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(PowerMonitorTheme.secondary)
-                        Spacer()
-                        Text(chartSummaryValue(points))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(PowerMonitorTheme.tertiary)
-                    }
-
-                    PowerTrendChart(points: points, metric: selectedMetric, range: selectedRange)
-                }
-            }
-        }
-    }
-
-    private var quickInfoSection: some View {
-        SectionCard(title: "实时详情") {
-            VStack(spacing: 10) {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                    DetailMetricCard(title: "设计容量", value: PowerFormatting.milliampHours(store.latestSnapshot?.designCapacity))
-                    DetailMetricCard(title: "满充容量", value: PowerFormatting.milliampHours(store.latestSnapshot?.fullChargeCapacity))
-                    DetailMetricCard(title: "实际循环", value: store.latestSnapshot?.cycleCount.map(String.init) ?? "--")
-                    DetailMetricCard(title: "健康度", value: PowerFormatting.health(store.latestSnapshot?.batteryHealthRatio))
-                    DetailMetricCard(title: "电池电压", value: PowerFormatting.volts(fromMillivolts: store.latestSnapshot?.voltageMillivolts))
-                    DetailMetricCard(title: "电池温度", value: PowerFormatting.temperature(store.latestSnapshot?.temperatureCelsius))
-                }
-
-                HStack(spacing: 8) {
-                    InlineInfoPill(label: "当前会话", value: PowerFormatting.duration(store.sessionSummary?.elapsed ?? 0))
-                    InlineInfoPill(label: "开始时间", value: store.sessionSummary.map { PowerFormatting.clockTime($0.startedAt) } ?? "--:--")
-                    InlineInfoPill(label: "电量变化", value: store.sessionSummary.map { PowerFormatting.signedPercent($0.batteryPercentDelta) } ?? "--")
-                }
-            }
-        }
-    }
-
-    private var activitySection: some View {
-        SectionCard(title: "连接历史") {
-            VStack(alignment: .leading, spacing: 8) {
-                RecentActivityGrid(snapshots: store.recentSnapshots(limit: 72))
-                Text("亮色代表功耗更高，所有方块都来自实际采样。")
-                    .font(.system(size: 10))
-                    .foregroundStyle(PowerMonitorTheme.muted)
-            }
-        }
-    }
-
-    private var subsystemSection: some View {
-        SectionCard(title: "SoC 分项功耗") {
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    DetailMetricCard(title: "CPU", value: PowerFormatting.watts(store.latestSnapshot?.cpuPowerWatts))
-                    DetailMetricCard(title: "GPU", value: PowerFormatting.watts(store.latestSnapshot?.gpuPowerWatts))
-                    DetailMetricCard(title: "ANE", value: PowerFormatting.watts(store.latestSnapshot?.anePowerWatts))
-                }
-
-                if let reason = store.latestSnapshot?.subsystemPowerUnavailableReason {
-                    Text(reason)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(PowerMonitorTheme.muted)
-                } else {
-                    Text("来自 powermetrics 的真实估算值，仅在系统允许时显示。")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(PowerMonitorTheme.muted)
-                }
-            }
-        }
-    }
-
-    private var batteryHealthSection: some View {
-        SectionCard(title: "电池健康与充电") {
-            VStack(spacing: 10) {
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("状态")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(PowerMonitorTheme.muted)
-                        Text(store.latestSnapshot?.batteryHealthCondition?.isEmpty == false ? store.latestSnapshot?.batteryHealthCondition ?? "正常" : (store.latestSnapshot?.batteryHealthState ?? "正常"))
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-
+                HStack {
+                    Text(chartTitle)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PowerMonitorTheme.secondary)
                     Spacer()
-
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("充电完成预计")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(PowerMonitorTheme.muted)
-                        Text(headerTime)
-                            .font(.system(size: 20, weight: .semibold, design: .rounded))
-                            .foregroundStyle(PowerMonitorTheme.accent)
-                            .monospacedDigit()
-                    }
+                    Text(chartValue(points))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(PowerMonitorTheme.tertiary)
                 }
 
-                HStack(spacing: 8) {
-                    InlineInfoPill(label: "序列号", value: store.latestSnapshot?.hardwareSerialNumber ?? "不可用")
-                    InlineInfoPill(label: "设计循环", value: store.latestSnapshot?.designCycleCount.map(String.init) ?? "--")
+                PowerTrendChart(points: points, metric: selectedMetric, range: selectedRange)
+                    .help(chartHelpText)
+            }
+        }
+    }
+
+    private var summaryGridSection: some View {
+        SectionCard(title: "关键读数") {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
+                DetailMetricCard(title: "设计容量", value: PowerFormatting.milliampHours(store.latestSnapshot?.designCapacity))
+                    .help("电池出厂设计容量。")
+                DetailMetricCard(title: "满充容量", value: PowerFormatting.milliampHours(store.latestSnapshot?.fullChargeCapacity))
+                    .help("电池当前实际满充容量。")
+                DetailMetricCard(title: "实际循环", value: store.latestSnapshot?.cycleCount.map(String.init) ?? "--")
+                    .help("当前实际循环次数。")
+                DetailMetricCard(title: "健康度", value: PowerFormatting.health(store.latestSnapshot?.batteryHealthRatio))
+                    .help("系统最大容量百分比或容量比值。")
+                DetailMetricCard(title: "电池电压", value: PowerFormatting.volts(fromMillivolts: store.latestSnapshot?.voltageMillivolts))
+                    .help("当前电池包电压。")
+                DetailMetricCard(title: "温度", value: PowerFormatting.temperature(store.latestSnapshot?.temperatureCelsius))
+                    .help("当前电池温度。")
+                DetailMetricCard(title: "CPU/GPU/ANE", value: subsystemSummary)
+                    .help("需要管理员权限才能拿到精细分项功耗。")
+                DetailMetricCard(title: "充电状态", value: store.latestSnapshot?.displayStatusText ?? "--")
+                    .help("当前处于外接电源、充电中或电池供电状态。")
+            }
+        }
+    }
+
+    private var processSection: some View {
+        SectionCard(title: "较耗电应用") {
+            VStack(spacing: 6) {
+                ForEach(Array(store.topProcesses.prefix(4))) { process in
+                    ProcessEnergyRow(process: process)
+                }
+
+                HStack(spacing: 6) {
+                    InlineInfoPill(label: "会话", value: PowerFormatting.duration(store.sessionSummary?.elapsed ?? 0))
+                        .help("当前电源会话时长。")
+                    InlineInfoPill(label: "开始", value: store.sessionSummary.map { PowerFormatting.clockTime($0.startedAt) } ?? "--:--")
+                        .help("当前会话开始时间。")
+                    InlineInfoPill(label: "电量变化", value: store.sessionSummary.map { PowerFormatting.signedPercent($0.batteryPercentDelta) } ?? "--")
+                        .help("当前会话的净电量变化。")
                 }
             }
         }
     }
 
     private var footerSection: some View {
-        VStack(spacing: 5) {
-            FooterRow(label: "实时层", value: "IOPowerSources + 事件/轮询")
-            FooterRow(label: "扩展层", value: "ioreg + system_profiler")
-            FooterRow(label: "更新", value: store.lastUpdatedText)
-            if let error = store.lastErrorMessage {
-                Text(error)
-                    .font(.system(size: 10))
-                    .foregroundStyle(PowerMonitorTheme.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        SectionCard(title: "电池健康与说明") {
+            VStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    InlineInfoPill(label: "状态", value: store.latestSnapshot?.batteryHealthState ?? "正常")
+                        .help("系统给出的电池健康状态。")
+                    InlineInfoPill(label: "序列号", value: store.latestSnapshot?.hardwareSerialNumber ?? "不可用")
+                        .help("电池硬件序列号。")
+                    InlineInfoPill(label: "设计循环", value: store.latestSnapshot?.designCycleCount.map(String.init) ?? "--")
+                        .help("公开电源字典里的设计循环指标，不等于实际循环次数。")
+                }
+
+                HStack {
+                    Text("数据源")
+                        .foregroundStyle(PowerMonitorTheme.muted)
+                    Spacer()
+                    Text("IOPowerSources / ioreg / system_profiler")
+                        .foregroundStyle(PowerMonitorTheme.secondary)
+                }
+                .font(.system(size: 10, weight: .medium))
+
+                HStack {
+                    Text("更新")
+                        .foregroundStyle(PowerMonitorTheme.muted)
+                    Spacer()
+                    Text(store.lastUpdatedText)
+                        .foregroundStyle(PowerMonitorTheme.secondary)
+                }
+                .font(.system(size: 10, weight: .medium))
+
+                if let error = store.lastErrorMessage {
+                    Text(error)
+                        .font(.system(size: 10))
+                        .foregroundStyle(PowerMonitorTheme.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
-        .padding(10)
-        .background(PowerMonitorTheme.footerBackground)
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(PowerMonitorTheme.cardBorder))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private var headerTime: String {
@@ -259,18 +248,40 @@ struct ContentView: View {
         return "预计剩余时间"
     }
 
-    private var chartSummaryTitle: String {
+    private var chartTitle: String {
         switch selectedMetric {
         case .power:
-            return "当前功耗趋势"
+            return "整机输入功率"
         case .batteryLevel:
-            return "电池电量走势"
+            return "电池电量"
         case .chargeRate:
-            return "电池电流走势"
+            return "电池电流"
         }
     }
 
-    private func chartSummaryValue(_ points: [PowerChartPoint]) -> String {
+    private var chartHelpText: String {
+        switch selectedMetric {
+        case .power:
+            return "整机输入功率变化图，帮助判断高负载时段。"
+        case .batteryLevel:
+            return "电池电量历史图，帮助理解在不同时间范围内电量涨跌。"
+        case .chargeRate:
+            return "电池电流变化图，帮助判断充电/放电强度。"
+        }
+    }
+
+    private var subsystemSummary: String {
+        if let snapshot = store.latestSnapshot,
+           let cpu = snapshot.cpuPowerWatts,
+           let gpu = snapshot.gpuPowerWatts,
+           let ane = snapshot.anePowerWatts {
+            return String(format: "%.1f/%.1f/%.1fW", cpu, gpu, ane)
+        }
+
+        return "需授权"
+    }
+
+    private func chartValue(_ points: [PowerChartPoint]) -> String {
         guard let latest = points.last?.value else {
             return "--"
         }
@@ -291,20 +302,20 @@ private struct HeaderCapsule: View {
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 1) {
             Text(title)
-                .font(.system(size: 9, weight: .medium))
+                .font(.system(size: 8, weight: .medium))
                 .foregroundStyle(PowerMonitorTheme.muted)
             Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(PowerMonitorTheme.secondary)
                 .monospacedDigit()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
         .background(Color.white.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 11))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -319,19 +330,19 @@ private struct CompactSegmentedControl<Item: Identifiable & Hashable>: View wher
                     selection = item
                 } label: {
                     Text(item.description)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(selection == item ? .white : PowerMonitorTheme.tertiary)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 5)
                         .background(selection == item ? PowerMonitorTheme.accent : Color.white.opacity(0.04))
-                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(4)
         .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 11))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -340,37 +351,95 @@ private struct InlineInfoPill: View {
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 9, weight: .medium))
+                .font(.system(size: 8, weight: .medium))
                 .foregroundStyle(PowerMonitorTheme.muted)
             Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(PowerMonitorTheme.secondary)
                 .monospacedDigit()
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
         .background(Color.white.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 11))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
-private struct FooterRow: View {
-    let label: String
-    let value: String
+private struct ProcessEnergyRow: View {
+    let process: ProcessEnergyStat
 
     var body: some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(PowerMonitorTheme.muted)
-            Spacer()
-            Text(value)
+        HStack(spacing: 8) {
+            Text(process.command)
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(PowerMonitorTheme.secondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(process.primaryScoreText)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(PowerMonitorTheme.secondary)
+                .monospacedDigit()
+                .frame(width: 76, alignment: .trailing)
+
+            Text(process.memoryText)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(PowerMonitorTheme.muted)
+                .frame(width: 42, alignment: .trailing)
         }
-        .font(.system(size: 10, weight: .medium))
+        .help("PID \(process.pid) · CPU \(String(format: "%.1f%%", process.cpuPercent)) · POWER \(String(format: "%.1f", process.powerScore)) · 内存 \(process.memoryText)")
+    }
+}
+
+private struct SettingsView: View {
+    @ObservedObject var store: PowerMonitorStore
+    @AppStorage(PowermetricsSubsystemPowerProvider.autoAttemptDefaultsKey) private var autoAttempt = false
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("设置")
+                    .font(.system(size: 18, weight: .bold))
+                Spacer()
+                Button("关闭") {
+                    dismiss()
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Toggle("自动尝试无密码 sudo 获取 SoC 分项功耗", isOn: $autoAttempt)
+                .help("开启后，应用会在后台尝试用无密码 sudo 读取 powermetrics。如果系统没有配置 NOPASSWD，这条路径仍然会失败。")
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("管理员采样")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("点击下面按钮会调用系统管理员鉴权弹窗，读取一次 CPU / GPU / ANE 分项功耗。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(PowerMonitorTheme.tertiary)
+                Button("运行管理员权限采样") {
+                    store.requestPrivilegedSubsystemSample()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("说明")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("适配器额定功率表示供电上限，系统输入功率表示当前整机真实消耗。两者不是同一个概念。")
+                Text("设计循环是公开电源字典里的设计指标，实际循环次数来自系统电池统计。")
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(PowerMonitorTheme.tertiary)
+
+            Spacer()
+        }
+        .padding(18)
+        .frame(width: 420, height: 300)
     }
 }
 

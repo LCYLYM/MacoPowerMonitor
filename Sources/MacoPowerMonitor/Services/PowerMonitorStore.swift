@@ -6,10 +6,13 @@ final class PowerMonitorStore: ObservableObject {
     @Published private(set) var latestSnapshot: PowerSnapshot?
     @Published private(set) var history: [PowerSnapshot]
     @Published private(set) var lastErrorMessage: String?
+    @Published private(set) var topProcesses: [ProcessEnergyStat] = []
 
     private let collector: PowerSnapshotCollecting
     private let historyStore: PowerHistoryStore
     private let scheduler: RepeatingTaskScheduler
+    private let processStatsProvider = ProcessEnergyStatsProvider.shared
+    private let subsystemPowerProvider = PowermetricsSubsystemPowerProvider.shared
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "store")
 
     private static let maxHistoryAge: TimeInterval = 60 * 60 * 24 * 10
@@ -57,6 +60,20 @@ final class PowerMonitorStore: ObservableObject {
     func refreshNow() {
         Task {
             await refresh()
+        }
+    }
+
+    func requestPrivilegedSubsystemSample() {
+        Task {
+            do {
+                let provider = subsystemPowerProvider
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try provider.refreshInteractively()
+                }.value
+                await refresh()
+            } catch {
+                lastErrorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -166,11 +183,18 @@ final class PowerMonitorStore: ObservableObject {
     private func refresh() async {
         do {
             let collector = self.collector
-            let snapshot = try await Task.detached(priority: .utility) {
+            async let snapshotTask: PowerSnapshot = Task.detached(priority: .utility) {
                 try collector.readSnapshot()
             }.value
+            async let processStatsTask: [ProcessEnergyStat] = Task.detached(priority: .utility) { [processStatsProvider] in
+                processStatsProvider.currentStats()
+            }.value
+
+            let snapshot = try await snapshotTask
+            let processStats = await processStatsTask
 
             apply(snapshot)
+            topProcesses = processStats
         } catch {
             lastErrorMessage = error.localizedDescription
             logger.error("Power refresh failed: \(error.localizedDescription, privacy: .public)")

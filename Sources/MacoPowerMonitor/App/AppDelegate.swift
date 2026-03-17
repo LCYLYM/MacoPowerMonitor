@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hostingController = NSHostingController(rootView: ContentView(store: PowerMonitorStore.shared))
         let window = NSWindow(contentViewController: hostingController)
         window.title = "MacoPowerMonitor Preview"
-        window.setContentSize(NSSize(width: AppConstants.panelWidth, height: 1020))
+        window.setContentSize(NSSize(width: AppConstants.panelWidth, height: 760))
         window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
