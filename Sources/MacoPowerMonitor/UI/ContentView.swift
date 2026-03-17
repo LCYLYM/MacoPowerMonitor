@@ -23,16 +23,20 @@ struct ContentView: View {
                         .strokeBorder(Color.white.opacity(0.12))
                 )
 
-            VStack(spacing: 8) {
-                headerSection
-                chartSection
-                summaryGridSection
-                processSection
-                footerSection
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 8) {
+                    headerSection
+                    chartSection
+                    summaryGridSection
+                    processSection
+                    footerSection
+                }
+                .padding(10)
             }
-            .padding(10)
         }
         .frame(width: AppConstants.panelWidth)
+        .frame(height: AppConstants.panelHeight)
+        .clipped()
         .sheet(isPresented: $showingSettings) {
             SettingsView(store: store)
         }
