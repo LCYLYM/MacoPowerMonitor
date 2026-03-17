@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>macOS Power Monitor Utility</title>
+<!-- Tailwind CSS v3 CDN -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            macBackground: 'rgba(28, 28, 30, 0.85)',
+            macAccent: '#0A84FF',
+            macGreen: '#30D158',
+            macRed: '#FF453A',
+            macBorder: 'rgba(255, 255, 255, 0.1)',
+          },
+          fontFamily: {
+            sans: ['SF Pro Display', 'Inter', 'PingFang SC', 'system-ui', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+<style data-purpose="glassmorphism-and-layout">
+    body {
+      background-color: transparent;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    /* Glassmorphism effect for the main container */
+    .mac-window {
+      width: 380px; /* Vertical aspect ratio similar to 21:9 reference */
+      background: var(--tw-bg-macBackground);
+      backdrop-filter: blur(25px) saturate(180%);
+      -webkit-backdrop-filter: blur(25px) saturate(180%);
+      border: 0.5px solid var(--tw-border-macBorder);
+      border-radius: 18px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(0,0,0,0.5);
+      color: #ffffff;
+      overflow: hidden;
+      font-weight: 400;
+    }
+
+    /* Custom scrollbar for a native look */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+    }
+
+    /* Chart grid lines styling */
+    .chart-grid-line {
+      stroke: rgba(255, 255, 255, 0.1);
+      stroke-width: 0.5;
+    }
+  </style>
+</head>
+<body class="bg-gray-900">
+<!-- BEGIN: MainContainer -->
+<main class="mac-window custom-scrollbar max-h-[900px] overflow-y-auto">
+<!-- BEGIN: Header -->
+<header class="p-5 pb-2 flex flex-col items-center border-b border-macBorder" data-purpose="status-summary">
+<div class="w-full flex justify-between items-center mb-6">
+<svg class="opacity-60" fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="18" xmlns="http://www.w3.org/2000/svg"><rect height="18" rx="2" ry="2" width="18" x="3" y="3"></rect><line x1="9" x2="9" y1="3" y2="21"></line></svg>
+<span class="text-sm font-medium tracking-tight opacity-80">电源监控</span>
+<svg class="opacity-60" fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="18" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+</div>
+<div class="text-5xl font-light mb-1 tracking-tighter">7:42</div>
+<div class="text-xs uppercase tracking-[0.2em] text-macAccent font-bold mb-4">预计剩余时间</div>
+<div class="flex gap-8 mb-4">
+<div class="text-center">
+<div class="text-xl font-medium">8.4 <span class="text-xs font-normal opacity-50">W</span></div>
+<div class="text-[10px] opacity-40 uppercase tracking-widest mt-1">实时功耗</div>
+</div>
+<div class="text-center">
+<div class="text-xl font-medium text-macGreen">86 <span class="text-xs font-normal opacity-50">%</span></div>
+<div class="text-[10px] opacity-40 uppercase tracking-widest mt-1">当前电量</div>
+</div>
+</div>
+</header>
+<!-- END: Header -->
+<!-- BEGIN: Main Chart Section -->
+<section class="p-4" data-purpose="historical-chart">
+<!-- Tabs -->
+<div class="bg-white/5 p-1 rounded-lg flex mb-4" data-purpose="chart-toggle">
+<button class="flex-1 text-[11px] py-1.5 bg-macAccent rounded-md shadow-sm font-medium">实时功耗</button>
+<button class="flex-1 text-[11px] py-1.5 text-white/60 hover:text-white transition-colors">电池电量</button>
+</div>
+<!-- Power Graph -->
+<div class="relative bg-black/20 rounded-xl p-3 border border-white/5" style="height: 180px;">
+<div class="flex justify-between text-[9px] opacity-30 mb-1">
+<span>25W</span>
+<span>历史功耗趋势 (1小时)</span>
+</div>
+<!-- SVG Sparkline Area -->
+<svg class="w-full h-32 mt-2 overflow-visible" preserveaspectratio="none" viewbox="0 0 300 100">
+<!-- Grid Lines -->
+<line class="chart-grid-line" x1="0" x2="300" y1="25" y2="25"></line>
+<line class="chart-grid-line" x1="0" x2="300" y1="50" y2="50"></line>
+<line class="chart-grid-line" x1="0" x2="300" y1="75" y2="75"></line>
+<!-- Gradient Definition -->
+<defs>
+<lineargradient id="powerGradient" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" style="stop-color:rgba(10, 132, 255, 0.4); stop-opacity:1"></stop>
+<stop offset="100%" style="stop-color:rgba(10, 132, 255, 0); stop-opacity:0"></stop>
+</lineargradient>
+</defs>
+<!-- Path Data -->
+<path d="M0,80 Q30,60 60,75 T120,40 T180,65 T240,30 T300,50 L300,100 L0,100 Z" fill="url(#powerGradient)"></path>
+<path d="M0,80 Q30,60 60,75 T120,40 T180,65 T240,30 T300,50" fill="none" stroke="#0A84FF" stroke-width="2"></path>
+<!-- Current Point -->
+<circle cx="300" cy="50" fill="#0A84FF" r="3"></circle>
+</svg>
+<div class="flex justify-between mt-1 text-[9px] opacity-30">
+<span>-60 min</span>
+<span>现在</span>
+</div>
+</div>
+</section>
+<!-- END: Main Chart Section -->
+<!-- BEGIN: Hardware Breakdown -->
+<section class="px-5 py-4" data-purpose="hardware-usage">
+<h3 class="text-[11px] font-bold text-white/40 uppercase tracking-widest mb-4">硬件能耗分布</h3>
+<div class="space-y-4">
+<!-- CPU Item -->
+<div class="flex flex-col gap-1.5">
+<div class="flex justify-between text-xs">
+<span class="opacity-80">CPU Complex</span>
+<span class="font-medium">3.2 W</span>
+</div>
+<div class="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+<div class="h-full bg-macAccent rounded-full" style="width: 35%;"></div>
+</div>
+</div>
+<!-- GPU Item -->
+<div class="flex flex-col gap-1.5">
+<div class="flex justify-between text-xs">
+<span class="opacity-80">GPU</span>
+<span class="font-medium">1.1 W</span>
+</div>
+<div class="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+<div class="h-full bg-macAccent rounded-full" style="width: 15%;"></div>
+</div>
+</div>
+<!-- Display Item -->
+<div class="flex flex-col gap-1.5">
+<div class="flex justify-between text-xs">
+<span class="opacity-80">显示器 (ProMotion)</span>
+<span class="font-medium">2.8 W</span>
+</div>
+<div class="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+<div class="h-full bg-macAccent rounded-full" style="width: 28%;"></div>
+</div>
+</div>
+<!-- Neural Engine Item -->
+<div class="flex flex-col gap-1.5">
+<div class="flex justify-between text-xs">
+<span class="opacity-80">神经网络引擎 (NPU)</span>
+<span class="font-medium">0.4 W</span>
+</div>
+<div class="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+<div class="h-full bg-macAccent rounded-full" style="width: 5%;"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- END: Hardware Breakdown -->
+<!-- BEGIN: Connection History (Grid) -->
+<section class="px-5 py-4 border-t border-white/5" data-purpose="history-grid">
+<div class="flex justify-between items-center mb-4">
+<h3 class="text-[11px] font-bold text-white/40 uppercase tracking-widest">运行历史记录</h3>
+<span class="text-[10px] text-macAccent">查看全部</span>
+</div>
+<!-- Activity Grid mimicking reference IMAGE_1 -->
+<div class="grid grid-cols-20 gap-1" style="display: grid; grid-template-columns: repeat(20, 1fr);">
+<!-- Generating 40 boxes (2 rows) -->
+<script>
+          const gridParent = document.currentScript.parentElement;
+          for (let i = 0; i < 40; i++) {
+            const div = document.createElement('div');
+            const intensity = Math.random();
+            div.className = 'aspect-square rounded-sm';
+            if (intensity > 0.8) div.classList.add('bg-macAccent');
+            else if (intensity > 0.4) div.classList.add('bg-macAccent/60');
+            else div.classList.add('bg-white/10');
+            gridParent.appendChild(div);
+          }
+        </script>
+</div>
+</section>
+<!-- END: Connection History -->
+<!-- BEGIN: Predictive Analytics -->
+<section class="px-5 py-5 bg-white/5 border-t border-white/5" data-purpose="endurance-forecast">
+<div class="flex items-start justify-between">
+<div>
+<h3 class="text-[11px] font-bold text-white/40 uppercase tracking-widest mb-1">续航预测</h3>
+<p class="text-[10px] text-white/50 max-w-[180px]">基于当前高负载任务（视频剪辑）计算，比平均水平低 15%。</p>
+</div>
+<div class="text-right">
+<div class="text-lg font-bold text-macRed">-1.2h</div>
+<div class="text-[9px] opacity-40">偏离基准</div>
+</div>
+</div>
+<div class="mt-4 p-3 bg-black/20 rounded-lg flex items-center gap-3">
+<div class="bg-macGreen/20 p-2 rounded-full">
+<svg fill="none" height="16" stroke="#30D158" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" viewbox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+</div>
+<div>
+<div class="text-xs font-medium">健康度 94%</div>
+<div class="text-[10px] opacity-40">电池状态良好 · 已完成 142 次循环</div>
+</div>
+</div>
+</section>
+<!-- END: Predictive Analytics -->
+<!-- BEGIN: Footer Branding -->
+<footer class="p-4 text-center opacity-20 hover:opacity-100 transition-opacity cursor-default">
+<div class="text-[9px] font-mono tracking-widest">ADVANCED POWER METRICS V2.4</div>
+</footer>
+<!-- END: Footer Branding -->
+</main>
+<!-- END: MainContainer -->
+<!-- JavaScript for interaction -->
+<script data-purpose="ui-interactions">
+    // Simple logic for the toggle button effect
+    document.querySelectorAll('[data-purpose="chart-toggle"] button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const parent = btn.parentElement;
+        parent.querySelectorAll('button').forEach(b => {
+          b.classList.remove('bg-macAccent', 'shadow-sm', 'font-medium');
+          b.classList.add('text-white/60');
+        });
+        btn.classList.add('bg-macAccent', 'shadow-sm', 'font-medium');
+        btn.classList.remove('text-white/60');
+      });
+    });
+  </script>
+</body></html>
