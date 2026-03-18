@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/app-icon.png" alt="Maco Power Monitor icon" width="112" />
+
 # Maco Power Monitor
 
 Native macOS menu bar power monitor for Apple Silicon.  
@@ -17,7 +19,9 @@ Compact glass panel. No fake data.
 [![Swift](https://img.shields.io/badge/Swift-6.2-f05138?style=for-the-badge)](https://www.swift.org/)
 [![License](https://img.shields.io/github/license/LCYLYM/MacoPowerMonitor?style=for-the-badge)](LICENSE)
 
-[Download Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest) • [Direct ZIP Download](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest/download/MacoPowerMonitor-v0.2.0-macos.zip) • [Report Bug](https://github.com/LCYLYM/MacoPowerMonitor/issues/new?template=bug_report.md) • [Request Feature](https://github.com/LCYLYM/MacoPowerMonitor/issues/new?template=feature_request.md)
+[Download Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest) • [DMG Installer](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest/download/MacoPowerMonitor-v0.3.0-macos.dmg) • [ZIP Package](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest/download/MacoPowerMonitor-v0.3.0-macos.zip) • [Report Bug](https://github.com/LCYLYM/MacoPowerMonitor/issues/new?template=bug_report.md) • [Request Feature](https://github.com/LCYLYM/MacoPowerMonitor/issues/new?template=feature_request.md)
+
+<img src="docs/images/6.png" alt="Maco Power Monitor poster" width="420" />
 
 </div>
 
@@ -54,6 +58,7 @@ It focuses on three things:
 | --- | --- |
 | Menu bar status icon | Open the dashboard instantly with one click |
 | Compact glass panel | Feels native to macOS and stays out of the way |
+| Formal app icon and DMG installer | Drag-to-Applications setup that feels ready for public release |
 | Multi-select chart toggles | Show `Power`, `Battery`, and `Current` together |
 | Bidirectional power view | Separate `System Input`, `Battery Output`, and `Battery Recharge` clearly |
 | Charge and discharge current | Understand battery flow direction without ambiguous mixed lines |
@@ -65,15 +70,23 @@ It focuses on three things:
 
 ### Install
 
-#### Option 1: Download the app
+#### Option 1: Install with the DMG
 
 1. Open [Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest)
-2. Download `MacoPowerMonitor-v0.2.0-macos.zip`
+2. Download `MacoPowerMonitor-v0.3.0-macos.dmg`
+3. Open the DMG
+4. Drag `MacoPowerMonitor.app` into `Applications`
+5. Launch the app from `Applications` or Spotlight
+
+#### Option 2: Download the ZIP
+
+1. Open [Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest)
+2. Download `MacoPowerMonitor-v0.3.0-macos.zip`
 3. Unzip it
 4. Move `MacoPowerMonitor.app` into `Applications`
 5. Launch the app and click the menu bar icon
 
-#### Option 2: Build from source
+#### Option 3: Build from source
 
 Requirements:
 
@@ -85,14 +98,21 @@ swift build
 swift run
 ```
 
-#### Option 3: Package locally
+#### Option 4: Package locally
 
 ```bash
 ./scripts/package_app.sh
 open dist/MacoPowerMonitor.app
 ```
 
-To create the same release-style zip and checksum used for GitHub Releases:
+To build the DMG installer locally:
+
+```bash
+./scripts/build_dmg.sh
+open dist/MacoPowerMonitor.dmg
+```
+
+To create the same release-style DMG, ZIP and checksum files used for GitHub Releases:
 
 ```bash
 ./scripts/build_release_assets.sh
@@ -206,6 +226,7 @@ Maco Power Monitor 是一个轻量级 macOS 状态栏电源监控工具，重点
 | --- | --- |
 | 状态栏图标 | 一眼看到当前电池状态，点击即可展开面板 |
 | 紧凑玻璃面板 | 更贴近 macOS 原生风格，视觉轻但信息密度高 |
+| 正式 App 图标与 DMG 安装包 | 拖入 `Applications` 即可安装，公开发布更完整 |
 | 多选图表切换 | `功耗 / 电量 / 电流` 可以同时显示，不用来回切图 |
 | 双向功率视图 | 清晰区分 `系统输入`、`电池输出`、`电池回充` |
 | 充放电电流拆分 | 不把正负方向混在一起，更容易理解当前流向 |
@@ -217,15 +238,23 @@ Maco Power Monitor 是一个轻量级 macOS 状态栏电源监控工具，重点
 
 ### 安装
 
-#### 方式一：直接下载应用
+#### 方式一：使用 DMG 安装包
 
 1. 打开 [Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest)
-2. 下载 `MacoPowerMonitor-v0.2.0-macos.zip`
+2. 下载 `MacoPowerMonitor-v0.3.0-macos.dmg`
+3. 打开 DMG
+4. 将 `MacoPowerMonitor.app` 拖动到 `Applications`
+5. 在 `Applications` 或 Spotlight 中启动应用
+
+#### 方式二：下载 ZIP 压缩包
+
+1. 打开 [Latest Release](https://github.com/LCYLYM/MacoPowerMonitor/releases/latest)
+2. 下载 `MacoPowerMonitor-v0.3.0-macos.zip`
 3. 解压
 4. 将 `MacoPowerMonitor.app` 移动到 `Applications`
 5. 打开应用并点击状态栏图标
 
-#### 方式二：从源码运行
+#### 方式三：从源码运行
 
 要求：
 
@@ -237,14 +266,21 @@ swift build
 swift run
 ```
 
-#### 方式三：本地打包 `.app`
+#### 方式四：本地打包 `.app`
 
 ```bash
 ./scripts/package_app.sh
 open dist/MacoPowerMonitor.app
 ```
 
-如果你想生成和 GitHub Release 相同格式的安装包与校验文件：
+如果你想在本地生成 DMG 安装包：
+
+```bash
+./scripts/build_dmg.sh
+open dist/MacoPowerMonitor.dmg
+```
+
+如果你想生成和 GitHub Release 相同格式的 DMG、ZIP 以及校验文件：
 
 ```bash
 ./scripts/build_release_assets.sh

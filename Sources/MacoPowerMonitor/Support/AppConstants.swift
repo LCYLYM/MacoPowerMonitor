@@ -2,7 +2,7 @@ import Foundation
 
 enum AppConstants {
     static let subsystem = "com.codex.MacoPowerMonitor"
-    static let appVersion = "0.2.0"
+    static let appVersion = "0.3.0"
     static let refreshInterval: TimeInterval = 30
     static let refreshTolerance: TimeInterval = 5
     static let panelWidth: CGFloat = 396
