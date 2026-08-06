@@ -196,6 +196,16 @@ final class PowerMonitorStore: ObservableObject {
         }
     }
 
+    func flushPendingBestEffort() {
+        Task(priority: .userInitiated) {
+            do {
+                try await historyEngine.flush()
+            } catch {
+                logger.error("Best-effort final flush failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     var lastUpdatedText: String {
         guard let latestSnapshot else {
             return "尚未完成首次采样"

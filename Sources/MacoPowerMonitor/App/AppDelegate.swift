@@ -17,14 +17,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var statusItemConfigurationAttempts = 0
-    private var terminationPending = false
-    private var terminationReplySent = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         runtimeSettings.configureOnLaunch()
 
         if let selfTest = ProcessInfo.processInfo.environment["MACO_POWER_MONITOR_SELF_TEST"] {
+            if selfTest == "quit" {
+                print("SELF_TEST=quit")
+                print("TERMINATE_REPLY=terminateNow")
+                AppControlActions.quitApplication()
+                return
+            }
             print(runtimeSettings.runSelfTest(named: selfTest))
             NSApp.terminate(nil)
             return
@@ -48,28 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if terminationReplySent {
-            return .terminateNow
-        }
-        guard !terminationPending else {
-            return .terminateLater
-        }
-
-        terminationPending = true
-        store.endPanelPresentation()
-
-        Task { @MainActor [weak self, weak sender] in
-            await self?.store.shutdown()
-            guard let self, let sender else { return }
-            self.replyToTerminationIfNeeded(sender: sender, timedOut: false)
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak sender] in
-            guard let self, let sender else { return }
-            self.replyToTerminationIfNeeded(sender: sender, timedOut: true)
-        }
-
-        return .terminateLater
+        .terminateNow
     }
 
     private func configureStatusItemIfNeeded() {
@@ -218,19 +201,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.endPanelPresentation()
         panel?.contentViewController = panelPlaceholderController
         stopEventMonitors()
-    }
-
-    private func replyToTerminationIfNeeded(sender: NSApplication, timedOut: Bool) {
-        guard !terminationReplySent else {
-            return
-        }
-
-        terminationPending = false
-        terminationReplySent = true
-        if timedOut {
-            logger.warning("History shutdown exceeded the two-second termination deadline")
-        }
-        sender.reply(toApplicationShouldTerminate: true)
     }
 
     private func ensurePanel() -> NSPanel {

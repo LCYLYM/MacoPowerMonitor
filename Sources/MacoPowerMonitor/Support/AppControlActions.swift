@@ -12,6 +12,7 @@ enum AppControlActions {
     }
 
     static func quitApplication() {
+        PowerMonitorStore.shared.flushPendingBestEffort()
         NSApp.terminate(nil)
     }
 }
