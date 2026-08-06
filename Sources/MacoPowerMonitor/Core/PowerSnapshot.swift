@@ -273,7 +273,7 @@ struct SessionSummary: Equatable, Sendable {
     let capacityDeltaMah: Int?
 }
 
-enum ChartMetric: String, CaseIterable, Identifiable {
+enum ChartMetric: String, CaseIterable, Identifiable, Sendable {
     case power
     case batteryLevel
     case chargeRate
@@ -340,7 +340,7 @@ enum ChartMetric: String, CaseIterable, Identifiable {
     }
 }
 
-enum ChartTimeRange: String, CaseIterable, Identifiable {
+enum ChartTimeRange: String, CaseIterable, Identifiable, Sendable {
     case oneHour
     case twentyFourHours
     case tenDays

@@ -8,13 +8,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = PowerMonitorStore.shared
     private let runtimeSettings = AppRuntimeSettings.shared
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "app")
+    private let panelSignposter = OSSignposter(subsystem: AppConstants.subsystem, category: "panel-presentation")
     private let statusIconAnimator = StatusBarBatteryIconAnimator()
+    private let panelPlaceholderController = PanelPlaceholderViewController()
     private var statusItem: NSStatusItem?
     private var panel: NSPanel?
     private var cancellables = Set<AnyCancellable>()
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var statusItemConfigurationAttempts = 0
+    private var terminationPending = false
+    private var terminationReplySent = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -34,12 +38,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         statusIconAnimator.invalidate()
+        panel?.contentViewController = panelPlaceholderController
         if let globalMonitor {
             NSEvent.removeMonitor(globalMonitor)
         }
         if let localMonitor {
             NSEvent.removeMonitor(localMonitor)
         }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if terminationReplySent {
+            return .terminateNow
+        }
+        guard !terminationPending else {
+            return .terminateLater
+        }
+
+        terminationPending = true
+        store.endPanelPresentation()
+
+        Task { @MainActor [weak self, weak sender] in
+            await self?.store.shutdown()
+            guard let self, let sender else { return }
+            self.replyToTerminationIfNeeded(sender: sender, timedOut: false)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak sender] in
+            guard let self, let sender else { return }
+            self.replyToTerminationIfNeeded(sender: sender, timedOut: true)
+        }
+
+        return .terminateLater
     }
 
     private func configureStatusItemIfNeeded() {
@@ -77,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
         logger.notice("Configured status item on attempt \(self.statusItemConfigurationAttempts, privacy: .public)")
         updateStatusItem(snapshot: store.latestSnapshot)
+        _ = ensurePanel()
 
         if ProcessInfo.processInfo.environment["MACO_POWER_MONITOR_DEBUG_WINDOW"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
@@ -153,6 +184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showPanel() {
+        let clock = ContinuousClock()
+        let presentationStartedAt = clock.now
+        let presentationState = panelSignposter.beginInterval("PanelPresentation")
         let panel = ensurePanel()
         if let button = statusItem?.button {
             position(panel: panel, relativeTo: button)
@@ -161,26 +195,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             positionFallback(panel: panel)
         }
         panel.makeKeyAndOrderFront(nil)
+        let openedAt = clock.now
+        panelSignposter.endInterval("PanelPresentation", presentationState)
+        let presentationMilliseconds = Self.milliseconds(from: presentationStartedAt.duration(to: openedAt))
+        if presentationMilliseconds > 100 {
+            logger.error("Panel presentation exceeded 100 ms: \(presentationMilliseconds, format: .fixed(precision: 1), privacy: .public) ms")
+        } else {
+            logger.notice("Panel presentation completed in \(presentationMilliseconds, format: .fixed(precision: 1), privacy: .public) ms")
+        }
         NSApp.activate(ignoringOtherApps: true)
         startEventMonitors()
+        store.beginPanelPresentation(openedAt: openedAt)
+
+        DispatchQueue.main.async { [weak self, weak panel] in
+            guard let self, let panel, panel.isVisible else { return }
+            self.mountPanelContent(in: panel)
+        }
     }
 
     private func closePanel() {
         panel?.orderOut(nil)
+        store.endPanelPresentation()
+        panel?.contentViewController = panelPlaceholderController
         stopEventMonitors()
+    }
+
+    private func replyToTerminationIfNeeded(sender: NSApplication, timedOut: Bool) {
+        guard !terminationReplySent else {
+            return
+        }
+
+        terminationPending = false
+        terminationReplySent = true
+        if timedOut {
+            logger.warning("History shutdown exceeded the two-second termination deadline")
+        }
+        sender.reply(toApplicationShouldTerminate: true)
     }
 
     private func ensurePanel() -> NSPanel {
         if let panel {
-            if let hostingController = panel.contentViewController as? NSHostingController<ContentView> {
-                hostingController.rootView = ContentView(store: store)
-            }
             return panel
         }
 
-        let contentView = ContentView(store: store)
-        let hostingController = NSHostingController(rootView: contentView)
-        let panel = FloatingPanel(contentViewController: hostingController)
+        let panel = FloatingPanel(contentViewController: panelPlaceholderController)
         panel.setContentSize(NSSize(width: AppConstants.panelWidth, height: AppConstants.panelHeight))
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.isReleasedWhenClosed = false
@@ -188,6 +246,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.level = .statusBar
         self.panel = panel
         return panel
+    }
+
+    private func mountPanelContent(in panel: NSPanel) {
+        guard panel.isVisible,
+              !(panel.contentViewController is NSHostingController<ContentView>) else {
+            return
+        }
+
+        panel.contentViewController = NSHostingController(rootView: ContentView(store: store))
+        panel.setContentSize(NSSize(width: AppConstants.panelWidth, height: AppConstants.panelHeight))
+    }
+
+    private static func milliseconds(from duration: Duration) -> Double {
+        let components = duration.components
+        return Double(components.seconds) * 1_000
+            + Double(components.attoseconds) / 1_000_000_000_000_000
     }
 
     private func position(panel: NSPanel, relativeTo button: NSStatusBarButton) {
@@ -264,6 +338,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(localMonitor)
             self.localMonitor = nil
         }
+    }
+}
+
+private final class PanelPlaceholderViewController: NSViewController {
+    override func loadView() {
+        let visualEffectView = NSVisualEffectView()
+        visualEffectView.material = .hudWindow
+        visualEffectView.blendingMode = .behindWindow
+        visualEffectView.state = .active
+        view = visualEffectView
     }
 }
 

@@ -6,6 +6,12 @@ struct ContentView: View {
     @State private var selectedRange: ChartTimeRange = .twentyFourHours
     @State private var showingSettings = false
 
+    init(store: PowerMonitorStore) {
+        self.store = store
+        _selectedChartMetrics = State(initialValue: store.selectedHistoryMetrics)
+        _selectedRange = State(initialValue: store.selectedHistoryRange)
+    }
+
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 24)
@@ -40,6 +46,15 @@ struct ContentView: View {
         .clipped()
         .sheet(isPresented: $showingSettings) {
             SettingsView(store: store)
+        }
+        .onAppear {
+            store.updateHistorySelection(metrics: selectedChartMetrics, range: selectedRange)
+        }
+        .onChange(of: selectedChartMetrics) { metrics in
+            store.updateHistorySelection(metrics: metrics, range: selectedRange)
+        }
+        .onChange(of: selectedRange) { range in
+            store.updateHistorySelection(metrics: selectedChartMetrics, range: range)
         }
     }
 
@@ -205,7 +220,7 @@ struct ContentView: View {
                 ForEach(Array(visibleMetrics.enumerated()), id: \.element) { index, metric in
                     MetricTrendSection(
                         metric: metric,
-                        series: store.chartSeries(for: metric, range: selectedRange),
+                        series: store.chartSeriesByMetric[metric] ?? [],
                         range: selectedRange,
                         showsXAxis: index == visibleMetrics.count - 1
                     )
@@ -238,7 +253,7 @@ struct ContentView: View {
     }
 
     private var processSection: some View {
-        SectionCard(title: "较耗电应用") {
+        SectionCard(title: "CPU 活跃应用") {
             VStack(spacing: 6) {
                 ForEach(Array(store.topProcesses.prefix(4))) { process in
                     ProcessEnergyRow(process: process)
@@ -384,14 +399,25 @@ struct ContentView: View {
     }
 
     private var subsystemSummary: String {
-        if let snapshot = store.latestSnapshot,
-           let cpu = snapshot.cpuPowerWatts,
-           let gpu = snapshot.gpuPowerWatts,
-           let ane = snapshot.anePowerWatts {
-            return String(format: "%.1f/%.1f/%.1fW", cpu, gpu, ane)
+        guard let snapshot = store.latestSnapshot else {
+            return "--"
         }
 
-        return "需授权"
+        let readings = [snapshot.cpuPowerWatts, snapshot.gpuPowerWatts, snapshot.anePowerWatts]
+        guard readings.contains(where: { $0 != nil }) else {
+            if snapshot.subsystemPowerUnavailableReason?.contains("正在启动") == true {
+                return "采样启动中"
+            }
+            if snapshot.subsystemPowerUnavailableReason?.contains("暂未返回") == true {
+                return "采样中断"
+            }
+            return "需授权"
+        }
+
+        let values = readings.map { value in
+            value.map { String(format: "%.1f", $0) } ?? "--"
+        }
+        return values.joined(separator: "/") + "W"
     }
 }
 
@@ -593,7 +619,7 @@ private struct ProcessEnergyRow: View {
                 .foregroundStyle(PowerMonitorTheme.muted)
                 .frame(width: 42, alignment: .trailing)
         }
-        .help("PID \(process.pid) · CPU \(String(format: "%.1f%%", process.cpuPercent)) · POWER \(String(format: "%.1f", process.powerScore)) · 内存 \(process.memoryText)")
+        .help("PID \(process.pid) · CPU \(String(format: "%.1f%%", process.cpuPercent)) · 内存 \(process.memoryText)")
     }
 }
 
@@ -668,10 +694,10 @@ private struct SettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("管理员采样")
                     .font(.system(size: 13, weight: .semibold))
-                Text("点击下面按钮会调用系统管理员鉴权弹窗，读取一次 CPU / GPU / ANE 分项功耗。")
+                Text("授权一次后，会在本次 App 运行期间持续更新 CPU / GPU / ANE 分项功耗；退出 App 后自动停止。")
                     .font(.system(size: 11))
                     .foregroundStyle(PowerMonitorTheme.tertiary)
-                Button("运行管理员权限采样") {
+                Button("启动管理员持续采样") {
                     store.requestPrivilegedSubsystemSample()
                 }
                 .buttonStyle(.borderedProminent)

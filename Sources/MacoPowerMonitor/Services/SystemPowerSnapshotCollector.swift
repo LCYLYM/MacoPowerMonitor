@@ -7,6 +7,11 @@ struct SystemPowerSnapshotCollector: PowerSnapshotCollecting {
     private let supplementalProvider = SupplementalBatteryMetricsProvider.shared
     private let subsystemPowerProvider = PowermetricsSubsystemPowerProvider.shared
 
+    func prewarmSlowMetrics() {
+        supplementalProvider.prewarmSlowMetricsIfNeeded()
+        subsystemPowerProvider.prewarmAutomaticMetricsIfNeeded()
+    }
+
     func readSnapshot() throws -> PowerSnapshot {
         let sourceDescription = try readPrimaryPowerSource()
         let adapter = readAdapterDetails()

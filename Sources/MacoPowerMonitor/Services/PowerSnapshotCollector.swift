@@ -2,6 +2,11 @@ import Foundation
 
 protocol PowerSnapshotCollecting: Sendable {
     func readSnapshot() throws -> PowerSnapshot
+    func prewarmSlowMetrics()
+}
+
+extension PowerSnapshotCollecting {
+    func prewarmSlowMetrics() {}
 }
 
 enum PowerSnapshotCollectorError: LocalizedError {

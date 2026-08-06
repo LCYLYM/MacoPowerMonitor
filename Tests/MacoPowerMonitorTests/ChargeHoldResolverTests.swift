@@ -1,4 +1,3 @@
-#if canImport(XCTest)
 import Foundation
 import XCTest
 @testable import MacoPowerMonitor
@@ -102,6 +101,15 @@ final class ChargeHoldResolverTests: XCTestCase {
         XCTAssertEqual(snapshot.displayStatusText, "外接电源")
     }
 
+    func testBackgroundChargeLimitReadUsesPlainSwiftCache() async {
+        let expected = ChargeLimitStatusProvider.shared.cachedStatusOnly()
+        let actual = await Task.detached {
+            ChargeLimitStatusProvider.shared.currentStatus()
+        }.value
+
+        XCTAssertEqual(actual, expected)
+    }
+
     private func resolve(
         source: PowerSourceKind = .acPower,
         level: Double,
@@ -131,4 +139,3 @@ final class ChargeHoldResolverTests: XCTestCase {
         )
     }
 }
-#endif

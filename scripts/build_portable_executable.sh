@@ -3,62 +3,75 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="MacoPowerMonitor"
-BUILD_DIR="$ROOT_DIR/.build"
 DIST_DIR="$ROOT_DIR/dist"
 APP_CONSTANTS_PATH="$ROOT_DIR/Sources/MacoPowerMonitor/Support/AppConstants.swift"
-ARCH="$(uname -m)"
+ARCH="arm64"
+BUILD_TRIPLE="${MACO_BUILD_TRIPLE:-arm64-apple-macosx13.0}"
+
+if [[ "$BUILD_TRIPLE" != arm64-* ]]; then
+  echo "Portable builds must target arm64, got: $BUILD_TRIPLE" >&2
+  exit 1
+fi
 
 cd "$ROOT_DIR"
 
-APP_VERSION="$(awk -F'\"' '/appVersion/ { print $2; exit }' "$APP_CONSTANTS_PATH")"
+APP_VERSION="$(awk -F'"' '/appVersion/ { print $2; exit }' "$APP_CONSTANTS_PATH")"
 if [[ -z "$APP_VERSION" ]]; then
   echo "Could not determine app version from $APP_CONSTANTS_PATH" >&2
   exit 1
 fi
 
-if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
-  swift build -c release
+BUILD_ARGS=(-c release --triple "$BUILD_TRIPLE")
+if [[ -n "${SDKROOT:-}" ]]; then
+  BUILD_ARGS+=(--sdk "$SDKROOT")
+fi
+if [[ "${MACO_DISABLE_SWIFTPM_SANDBOX:-0}" == "1" ]]; then
+  BUILD_ARGS+=(--disable-sandbox)
 fi
 
-EXECUTABLE_PATH="$(find "$BUILD_DIR" -type f -path "*/release/$APP_NAME" | head -n 1)"
-if [[ -z "$EXECUTABLE_PATH" ]]; then
-  echo "Could not find release executable for $APP_NAME" >&2
+if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
+  swift build "${BUILD_ARGS[@]}"
+fi
+
+BIN_PATH="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
+EXECUTABLE_PATH="$BIN_PATH/$APP_NAME"
+if [[ ! -f "$EXECUTABLE_PATH" ]]; then
+  echo "Release executable not found at $EXECUTABLE_PATH" >&2
   exit 1
 fi
 
-PORTABLE_DIR="$DIST_DIR/$APP_NAME-v$APP_VERSION-macos-$ARCH"
-PORTABLE_EXECUTABLE="$PORTABLE_DIR/$APP_NAME"
-LAUNCHER_PATH="$PORTABLE_DIR/Launch $APP_NAME.command"
-README_PATH="$PORTABLE_DIR/README.txt"
+PORTABLE_EXECUTABLE="$DIST_DIR/$APP_NAME-v$APP_VERSION-macos-$ARCH"
 
-rm -rf "$PORTABLE_DIR"
-mkdir -p "$PORTABLE_DIR"
+rm -rf "$PORTABLE_EXECUTABLE"
+mkdir -p "$DIST_DIR"
 cp "$EXECUTABLE_PATH" "$PORTABLE_EXECUTABLE"
 chmod +x "$PORTABLE_EXECUTABLE"
 
 if command -v codesign >/dev/null 2>&1; then
-  codesign --force --sign - "$PORTABLE_EXECUTABLE" >/dev/null 2>&1 || true
+  codesign --force --sign - "$PORTABLE_EXECUTABLE"
+  codesign --verify --strict --verbose=2 "$PORTABLE_EXECUTABLE"
 fi
 
-cat > "$LAUNCHER_PATH" <<'LAUNCHER'
-#!/bin/zsh
-set -euo pipefail
+if ! file "$PORTABLE_EXECUTABLE" | grep -q "Mach-O 64-bit executable $ARCH"; then
+  echo "Portable executable has an unexpected architecture" >&2
+  exit 1
+fi
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec "$ROOT_DIR/MacoPowerMonitor"
-LAUNCHER
-chmod +x "$LAUNCHER_PATH"
+UNEXPECTED_DEPENDENCIES="$(otool -L "$PORTABLE_EXECUTABLE" | tail -n +2 | awk '{print $1}' | grep -Ev '^/System/Library/|^/usr/lib/' || true)"
+if [[ -n "$UNEXPECTED_DEPENDENCIES" ]]; then
+  echo "Portable executable has non-system dependencies:" >&2
+  echo "$UNEXPECTED_DEPENDENCIES" >&2
+  exit 1
+fi
 
-cat > "$README_PATH" <<EOF_README
-Maco Power Monitor 免安装可执行文件
+if nm -nm "$PORTABLE_EXECUTABLE" | grep -E 'prunedHistory|chartBuckets|PowerHistoryStore' >/dev/null; then
+  echo "Portable executable still contains the legacy in-memory history implementation" >&2
+  exit 1
+fi
+if ! nm -nm "$PORTABLE_EXECUTABLE" | grep 'PowerHistoryEngine' >/dev/null; then
+  echo "Portable executable does not contain PowerHistoryEngine" >&2
+  exit 1
+fi
 
-- 直接在终端中运行：
-    ./MacoPowerMonitor
-- 或双击“Launch MacoPowerMonitor.command”。
-- 程序运行后会显示在 macOS 菜单栏；关闭终端或按 Control-C 可结束进程。
-- 不需要移动到 Applications；但“开机自启”仅在 .app 版本中可用。
-- 此构建目标为 macOS 13+、$ARCH 架构。
-EOF_README
-
-echo "Built portable executable bundle:"
-echo "$PORTABLE_DIR"
+echo "Built portable executable:"
+echo "$PORTABLE_EXECUTABLE"

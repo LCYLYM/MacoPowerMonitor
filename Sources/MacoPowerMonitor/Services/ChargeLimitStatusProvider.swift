@@ -44,23 +44,61 @@ final class ChargeLimitStatusProvider: @unchecked Sendable {
     private var client: AnyObject?
     private var messageSendSymbol: UnsafeMutableRawPointer?
     private var didAttemptInitialization = false
+    private var refreshScheduled = false
     private var reportedErrors = Set<String>()
 
     func currentStatus() -> ChargeLimitStatus {
-        queue.sync {
-            let now = Date()
-            if let lastRefreshDate,
-               now.timeIntervalSince(lastRefreshDate) < refreshInterval {
-                return cachedStatus
-            }
+        // PowerUISmartChargeClient is not safe to invoke from a Swift
+        // cooperative worker thread. Background snapshot tasks must only read
+        // the plain Swift cache and never move PowerUI objects across threads.
+        guard Thread.isMainThread else {
+            return cachedStatusOnly()
+        }
 
-            cachedStatus = readStatus()
-            self.lastRefreshDate = now
+        let now = Date()
+        if let cached = queue.sync(execute: { () -> ChargeLimitStatus? in
+            guard let lastRefreshDate,
+                  now.timeIntervalSince(lastRefreshDate) < refreshInterval else {
+                return nil
+            }
             return cachedStatus
+        }) {
+            return cached
+        }
+
+        let status = readStatus()
+        queue.sync {
+            cachedStatus = status
+            lastRefreshDate = now
+        }
+        return status
+    }
+
+    func cachedStatusOnly() -> ChargeLimitStatus {
+        queue.sync { cachedStatus }
+    }
+
+    func prewarm() {
+        let now = Date()
+        let shouldSchedule = queue.sync { () -> Bool in
+            let isStale = lastRefreshDate.map { now.timeIntervalSince($0) >= refreshInterval } ?? true
+            guard isStale, !refreshScheduled else { return false }
+            refreshScheduled = true
+            return true
+        }
+        guard shouldSchedule else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self else { return }
+            _ = self.currentStatus()
+            self.queue.sync {
+                self.refreshScheduled = false
+            }
         }
     }
 
     private func readStatus() -> ChargeLimitStatus {
+        precondition(Thread.isMainThread)
         guard ProcessInfo.processInfo.isOperatingSystemAtLeast(
             OperatingSystemVersion(majorVersion: 26, minorVersion: 4, patchVersion: 0)
         ) else {

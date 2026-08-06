@@ -7,7 +7,7 @@ DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 RELEASES_DIR="$DIST_DIR/releases"
 DMG_PATH="$DIST_DIR/$APP_NAME.dmg"
-ARCH="$(uname -m)"
+ARCH="arm64"
 
 cd "$ROOT_DIR"
 
@@ -21,16 +21,16 @@ CHECKSUM_PATH="$ZIP_PATH.sha256"
 DMG_NAME="$APP_NAME-v$VERSION-macos.dmg"
 DMG_RELEASE_PATH="$RELEASES_DIR/$DMG_NAME"
 DMG_CHECKSUM_PATH="$DMG_RELEASE_PATH.sha256"
-PORTABLE_DIR_NAME="$APP_NAME-v$VERSION-macos-$ARCH"
-PORTABLE_DIR="$DIST_DIR/$PORTABLE_DIR_NAME"
-PORTABLE_ZIP_NAME="$PORTABLE_DIR_NAME.zip"
+PORTABLE_NAME="$APP_NAME-v$VERSION-macos-$ARCH"
+PORTABLE_EXECUTABLE="$DIST_DIR/$PORTABLE_NAME"
+PORTABLE_ZIP_NAME="$PORTABLE_NAME.zip"
 PORTABLE_ZIP_PATH="$RELEASES_DIR/$PORTABLE_ZIP_NAME"
 PORTABLE_CHECKSUM_PATH="$PORTABLE_ZIP_PATH.sha256"
 
 SKIP_BUILD=1 ./scripts/build_portable_executable.sh
 
-if [[ ! -d "$PORTABLE_DIR" ]]; then
-  echo "Portable executable bundle not found at $PORTABLE_DIR" >&2
+if [[ ! -f "$PORTABLE_EXECUTABLE" ]]; then
+  echo "Portable executable not found at $PORTABLE_EXECUTABLE" >&2
   exit 1
 fi
 
@@ -41,7 +41,7 @@ ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$ZIP_PATH"
 shasum -a 256 "$ZIP_PATH" | awk '{print $1}' > "$CHECKSUM_PATH"
 cp "$DMG_PATH" "$DMG_RELEASE_PATH"
 shasum -a 256 "$DMG_RELEASE_PATH" | awk '{print $1}' > "$DMG_CHECKSUM_PATH"
-ditto -c -k --sequesterRsrc --keepParent "$PORTABLE_DIR" "$PORTABLE_ZIP_PATH"
+ditto -c -k --sequesterRsrc --keepParent "$PORTABLE_EXECUTABLE" "$PORTABLE_ZIP_PATH"
 shasum -a 256 "$PORTABLE_ZIP_PATH" | awk '{print $1}' > "$PORTABLE_CHECKSUM_PATH"
 
 echo "Release assets:"

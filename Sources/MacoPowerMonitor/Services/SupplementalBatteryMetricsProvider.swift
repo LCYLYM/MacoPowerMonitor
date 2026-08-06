@@ -32,60 +32,78 @@ final class SupplementalBatteryMetricsProvider: @unchecked Sendable {
     static let shared = SupplementalBatteryMetricsProvider()
 
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "supplemental-battery")
-    private let queue = DispatchQueue(label: "com.codex.MacoPowerMonitor.supplemental-battery")
+    private let stateQueue = DispatchQueue(label: "com.codex.MacoPowerMonitor.supplemental-battery.state")
+    private let profilerQueue = DispatchQueue(label: "com.codex.MacoPowerMonitor.supplemental-battery.profiler", qos: .utility)
     private let chargeLimitStatusProvider = ChargeLimitStatusProvider.shared
     private var cachedSystemProfilerMetrics: SystemProfilerMetrics?
     private var lastSystemProfilerRefreshDate: Date?
+    private var isSystemProfilerRefreshInFlight = false
 
     private let systemProfilerRefreshInterval: TimeInterval = 5 * 60
 
     func currentMetrics() -> SupplementalBatteryMetrics? {
-        queue.sync {
-            let now = Date()
+        let ioRegistryMetrics: IORegistryMetrics
+        do {
+            ioRegistryMetrics = try readIORegistryMetrics()
+        } catch {
+            logger.error("Failed to fetch IORegistry battery metrics: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
 
-            let ioRegistryMetrics: IORegistryMetrics
-            do {
-                ioRegistryMetrics = try readIORegistryMetrics()
-            } catch {
-                logger.error("Failed to fetch IORegistry battery metrics: \(error.localizedDescription, privacy: .public)")
-                return nil
-            }
+        let profilerMetrics = stateQueue.sync { cachedSystemProfilerMetrics }
 
-            if cachedSystemProfilerMetrics == nil
-                || lastSystemProfilerRefreshDate.map({ now.timeIntervalSince($0) >= systemProfilerRefreshInterval }) != false {
-                do {
-                    cachedSystemProfilerMetrics = try readSystemProfilerMetrics()
-                    lastSystemProfilerRefreshDate = now
-                } catch {
-                    logger.error("Failed to fetch system_profiler battery metrics: \(error.localizedDescription, privacy: .public)")
+        return SupplementalBatteryMetrics(
+            designCapacityMah: ioRegistryMetrics.designCapacityMah,
+            fullChargeCapacityMah: ioRegistryMetrics.fullChargeCapacityMah,
+            cycleCount: profilerMetrics?.cycleCount ?? ioRegistryMetrics.cycleCount,
+            maximumCapacityPercent: profilerMetrics?.maximumCapacityPercent,
+            temperatureCelsius: ioRegistryMetrics.temperatureCelsius,
+            voltageMillivolts: ioRegistryMetrics.voltageMillivolts,
+            amperageMilliamps: ioRegistryMetrics.amperageMilliamps,
+            timeRemainingMinutes: ioRegistryMetrics.timeRemainingMinutes,
+            systemInputWatts: ioRegistryMetrics.systemInputWatts,
+            batteryPowerWatts: ioRegistryMetrics.batteryPowerWatts,
+            adapterWatts: ioRegistryMetrics.adapterWatts,
+            adapterVoltageMillivolts: ioRegistryMetrics.adapterVoltageMillivolts,
+            adapterCurrentMilliamps: ioRegistryMetrics.adapterCurrentMilliamps,
+            adapterInputVoltageMillivolts: ioRegistryMetrics.adapterInputVoltageMillivolts,
+            adapterInputCurrentMilliamps: ioRegistryMetrics.adapterInputCurrentMilliamps,
+            adapterProtocol: ioRegistryMetrics.protocolDetection.protocol,
+            adapterProtocolDetail: ioRegistryMetrics.protocolDetection.detail,
+            adapterVendorID: ioRegistryMetrics.protocolDetection.vendorID,
+            adapterProductID: ioRegistryMetrics.protocolDetection.productID,
+            adapterPDRevisionCode: ioRegistryMetrics.protocolDetection.pdRevisionCode,
+            chargeStatus: ioRegistryMetrics.chargeStatus,
+            notChargingReason: ioRegistryMetrics.notChargingReason,
+            chargeLimitStatus: chargeLimitStatusProvider.cachedStatusOnly()
+        )
+    }
+
+    func prewarmSlowMetricsIfNeeded() {
+        chargeLimitStatusProvider.prewarm()
+        let now = Date()
+        let shouldRefresh = stateQueue.sync { () -> Bool in
+            let isStale = cachedSystemProfilerMetrics == nil
+                || lastSystemProfilerRefreshDate.map({ now.timeIntervalSince($0) >= systemProfilerRefreshInterval }) != false
+            guard isStale, !isSystemProfilerRefreshInFlight else { return false }
+            isSystemProfilerRefreshInFlight = true
+            return true
+        }
+        guard shouldRefresh else { return }
+
+        profilerQueue.async { [weak self] in
+            guard let self else { return }
+            let result = Result { try self.readSystemProfilerMetrics() }
+            self.stateQueue.async {
+                self.isSystemProfilerRefreshInFlight = false
+                switch result {
+                case let .success(metrics):
+                    self.cachedSystemProfilerMetrics = metrics
+                    self.lastSystemProfilerRefreshDate = Date()
+                case let .failure(error):
+                    self.logger.error("Failed to fetch system_profiler battery metrics: \(error.localizedDescription, privacy: .public)")
                 }
             }
-
-            return SupplementalBatteryMetrics(
-                designCapacityMah: ioRegistryMetrics.designCapacityMah,
-                fullChargeCapacityMah: ioRegistryMetrics.fullChargeCapacityMah,
-                cycleCount: cachedSystemProfilerMetrics?.cycleCount ?? ioRegistryMetrics.cycleCount,
-                maximumCapacityPercent: cachedSystemProfilerMetrics?.maximumCapacityPercent,
-                temperatureCelsius: ioRegistryMetrics.temperatureCelsius,
-                voltageMillivolts: ioRegistryMetrics.voltageMillivolts,
-                amperageMilliamps: ioRegistryMetrics.amperageMilliamps,
-                timeRemainingMinutes: ioRegistryMetrics.timeRemainingMinutes,
-                systemInputWatts: ioRegistryMetrics.systemInputWatts,
-                batteryPowerWatts: ioRegistryMetrics.batteryPowerWatts,
-                adapterWatts: ioRegistryMetrics.adapterWatts,
-                adapterVoltageMillivolts: ioRegistryMetrics.adapterVoltageMillivolts,
-                adapterCurrentMilliamps: ioRegistryMetrics.adapterCurrentMilliamps,
-                adapterInputVoltageMillivolts: ioRegistryMetrics.adapterInputVoltageMillivolts,
-                adapterInputCurrentMilliamps: ioRegistryMetrics.adapterInputCurrentMilliamps,
-                adapterProtocol: ioRegistryMetrics.protocolDetection.protocol,
-                adapterProtocolDetail: ioRegistryMetrics.protocolDetection.detail,
-                adapterVendorID: ioRegistryMetrics.protocolDetection.vendorID,
-                adapterProductID: ioRegistryMetrics.protocolDetection.productID,
-                adapterPDRevisionCode: ioRegistryMetrics.protocolDetection.pdRevisionCode,
-                chargeStatus: ioRegistryMetrics.chargeStatus,
-                notChargingReason: ioRegistryMetrics.notChargingReason,
-                chargeLimitStatus: chargeLimitStatusProvider.currentStatus()
-            )
         }
     }
 

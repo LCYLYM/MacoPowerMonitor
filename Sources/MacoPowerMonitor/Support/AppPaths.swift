@@ -8,7 +8,16 @@ enum AppPaths {
         return baseURL.appendingPathComponent("MacoPowerMonitor", isDirectory: true)
     }
 
-    static var historyFileURL: URL {
+    static var historyDirectoryURL: URL {
+        applicationSupportDirectory.appendingPathComponent("power-history", isDirectory: true)
+    }
+
+    static var legacyHistoryFileURL: URL {
         applicationSupportDirectory.appendingPathComponent("power-history.json")
+    }
+
+    @available(*, deprecated, renamed: "legacyHistoryFileURL")
+    static var historyFileURL: URL {
+        legacyHistoryFileURL
     }
 }

@@ -139,20 +139,22 @@ private struct CompactHistoryCanvas: View {
     private var historyLinesLayer: some View {
         ZStack {
             ForEach(series) { series in
-                let points = pointsForSeries(series)
-                if points.count >= 2 {
-                    HistoryAreaShape(points: points, baselineY: chartRect.maxY)
-                        .fill(style(for: series.id).fillGradient)
+                let segments = pointSegmentsForSeries(series)
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, points in
+                    if points.count >= 2 {
+                        HistoryAreaShape(points: points, baselineY: chartRect.maxY)
+                            .fill(style(for: series.id).fillGradient)
 
-                    HistoryLineShape(points: points)
-                        .stroke(style(for: series.id).lineColor, style: style(for: series.id).strokeStyle)
-
-                    if let lastPoint = points.last {
-                        Circle()
-                            .fill(style(for: series.id).lineColor)
-                            .frame(width: 8, height: 8)
-                            .position(lastPoint)
+                        HistoryLineShape(points: points)
+                            .stroke(style(for: series.id).lineColor, style: style(for: series.id).strokeStyle)
                     }
+                }
+
+                if let lastPoint = segments.last?.last {
+                    Circle()
+                        .fill(style(for: series.id).lineColor)
+                        .frame(width: 8, height: 8)
+                        .position(lastPoint)
                 }
             }
         }
@@ -320,6 +322,31 @@ private struct CompactHistoryCanvas: View {
                 x: xPosition(for: point.timestamp),
                 y: yPosition(for: point.value)
             )
+        }
+    }
+
+    private func pointSegmentsForSeries(_ series: PowerChartSeries) -> [[CGPoint]] {
+        let sortedPoints = series.points.sorted { $0.timestamp < $1.timestamp }
+        guard !sortedPoints.isEmpty else { return [] }
+
+        let maximumContinuousGap = (range.interval / Double(range.bucketCount)) * 1.5
+        var segments: [[PowerChartPoint]] = [[sortedPoints[0]]]
+        for point in sortedPoints.dropFirst() {
+            if let previous = segments.last?.last,
+               point.timestamp.timeIntervalSince(previous.timestamp) > maximumContinuousGap {
+                segments.append([point])
+            } else {
+                segments[segments.count - 1].append(point)
+            }
+        }
+
+        return segments.map { points in
+            points.map { point in
+                CGPoint(
+                    x: xPosition(for: point.timestamp),
+                    y: yPosition(for: point.value)
+                )
+            }
         }
     }
 

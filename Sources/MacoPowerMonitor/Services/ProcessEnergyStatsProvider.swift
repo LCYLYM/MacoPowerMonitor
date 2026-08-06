@@ -19,7 +19,11 @@ struct ProcessEnergyStat: Identifiable, Sendable {
     }
 }
 
-final class ProcessEnergyStatsProvider: @unchecked Sendable {
+protocol ProcessEnergyStatsProviding: Sendable {
+    func currentStats(limit: Int, forceRefresh: Bool) -> [ProcessEnergyStat]
+}
+
+final class ProcessEnergyStatsProvider: ProcessEnergyStatsProviding, @unchecked Sendable {
     static let shared = ProcessEnergyStatsProvider()
 
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "process-energy")
@@ -28,10 +32,11 @@ final class ProcessEnergyStatsProvider: @unchecked Sendable {
     private var lastRefreshDate: Date?
     private let refreshInterval: TimeInterval = 30
 
-    func currentStats(limit: Int = 6) -> [ProcessEnergyStat] {
+    func currentStats(limit: Int = 6, forceRefresh: Bool = false) -> [ProcessEnergyStat] {
         queue.sync {
             let now = Date()
-            if let lastRefreshDate,
+            if !forceRefresh,
+               let lastRefreshDate,
                now.timeIntervalSince(lastRefreshDate) < refreshInterval,
                !cachedStats.isEmpty {
                 return Array(cachedStats.prefix(limit))
@@ -40,6 +45,8 @@ final class ProcessEnergyStatsProvider: @unchecked Sendable {
             do {
                 cachedStats = try fetchStats()
                 lastRefreshDate = now
+                return Array(cachedStats.prefix(limit))
+            } catch is CancellationError {
                 return Array(cachedStats.prefix(limit))
             } catch {
                 logger.error("Failed to fetch process energy stats: \(error.localizedDescription, privacy: .public)")
@@ -50,43 +57,43 @@ final class ProcessEnergyStatsProvider: @unchecked Sendable {
 
     private func fetchStats() throws -> [ProcessEnergyStat] {
         let data = try CommandRunner.run(
-            executable: "/usr/bin/top",
-            arguments: ["-l", "1", "-o", "cpu", "-stats", "pid,command,cpu,mem,power"]
+            executable: "/bin/ps",
+            arguments: ["-axo", "pid=,%cpu=,rss=,comm="],
+            timeout: 0.25
         )
 
         let output = String(decoding: data, as: UTF8.self)
-        let rows = output.split(separator: "\n").map(String.init)
-        guard let headerIndex = rows.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("PID") }) else {
-            return []
-        }
-
-        return rows
-            .dropFirst(headerIndex + 1)
+        return output.split(separator: "\n").map(String.init)
             .compactMap(parseRow(_:))
-            .filter { $0.command != "top" && $0.command != "MacoPowerMonitor" }
+            .filter { $0.command != "ps" && $0.command != "MacoPowerMonitor" }
             .sorted { lhs, rhs in
-                if lhs.powerScore == rhs.powerScore {
-                    return lhs.cpuPercent > rhs.cpuPercent
-                }
-                return lhs.powerScore > rhs.powerScore
+                lhs.cpuPercent > rhs.cpuPercent
             }
     }
 
     private func parseRow(_ row: String) -> ProcessEnergyStat? {
-        let parts = row.split(whereSeparator: \.isWhitespace)
-        guard parts.count >= 5,
+        let parts = row.split(maxSplits: 3, whereSeparator: \.isWhitespace)
+        guard parts.count == 4,
               let pid = Int(parts[0]),
-              let cpu = Double(parts[2]),
-              let power = Double(parts[4]) else {
+              let cpu = Double(parts[1]),
+              let residentKilobytes = Int(parts[2]) else {
             return nil
         }
 
+        let command = URL(fileURLWithPath: String(parts[3])).lastPathComponent
         return ProcessEnergyStat(
             pid: pid,
-            command: String(parts[1]),
+            command: command,
             cpuPercent: cpu,
-            powerScore: power,
-            memoryText: String(parts[3])
+            powerScore: 0,
+            memoryText: Self.memoryText(residentKilobytes: residentKilobytes)
         )
+    }
+
+    private static func memoryText(residentKilobytes: Int) -> String {
+        if residentKilobytes >= 1_024 {
+            return String(format: "%.0fM", Double(residentKilobytes) / 1_024)
+        }
+        return "\(residentKilobytes)K"
     }
 }
