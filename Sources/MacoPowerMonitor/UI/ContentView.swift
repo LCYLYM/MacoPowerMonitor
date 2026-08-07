@@ -38,8 +38,11 @@ struct ContentView: View {
                     processSection
                     footerSection
                 }
-                .padding(10)
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 20)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 24))
         }
         .frame(width: AppConstants.panelWidth)
         .frame(height: AppConstants.panelHeight)
