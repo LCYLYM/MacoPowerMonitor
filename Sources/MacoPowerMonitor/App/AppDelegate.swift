@@ -10,7 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "app")
     private let panelSignposter = OSSignposter(subsystem: AppConstants.subsystem, category: "panel-presentation")
     private let statusIconAnimator = StatusBarBatteryIconAnimator()
-    private let panelPlaceholderController = PanelPlaceholderViewController()
+    private let panelContentContainer = PanelContainerViewController()
     private var statusItem: NSStatusItem?
     private var panel: NSPanel?
     private var cancellables = Set<AnyCancellable>()
@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         statusIconAnimator.invalidate()
-        panel?.contentViewController = panelPlaceholderController
+        panelContentContainer.unmountContent()
         if let globalMonitor {
             NSEvent.removeMonitor(globalMonitor)
         }
@@ -171,12 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let presentationStartedAt = clock.now
         let presentationState = panelSignposter.beginInterval("PanelPresentation")
         let panel = ensurePanel()
-        if let button = statusItem?.button {
-            position(panel: panel, relativeTo: button)
-        } else {
-            logger.warning("Showing panel without status item button; using fallback positioning")
-            positionFallback(panel: panel)
-        }
+        position(panel: panel)
         panel.makeKeyAndOrderFront(nil)
         let openedAt = clock.now
         panelSignposter.endInterval("PanelPresentation", presentationState)
@@ -199,7 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func closePanel() {
         panel?.orderOut(nil)
         store.endPanelPresentation()
-        panel?.contentViewController = panelPlaceholderController
+        panelContentContainer.unmountContent()
         stopEventMonitors()
     }
 
@@ -208,7 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return panel
         }
 
-        let panel = FloatingPanel(contentViewController: panelPlaceholderController)
+        let panel = FloatingPanel(contentViewController: panelContentContainer)
         panel.setContentSize(NSSize(width: AppConstants.panelWidth, height: AppConstants.panelHeight))
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.isReleasedWhenClosed = false
@@ -218,14 +213,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return panel
     }
 
+    /// Mounts SwiftUI as a child of the permanent container instead of swapping
+    /// the panel's `contentViewController`. The latter collapses the window to
+    /// 0x0 and displaces `origin.y` by the panel height, which can throw the
+    /// panel onto an adjacent display. See `PanelContainerViewController`.
     private func mountPanelContent(in panel: NSPanel) {
-        guard panel.isVisible,
-              !(panel.contentViewController is NSHostingController<ContentView>) else {
+        guard panel.isVisible, !panelContentContainer.isContentMounted else {
             return
         }
 
-        panel.contentViewController = NSHostingController(rootView: ContentView(store: store))
-        panel.setContentSize(NSSize(width: AppConstants.panelWidth, height: AppConstants.panelHeight))
+        let frameBeforeMount = panel.frame
+        let hostingController = NSHostingController(rootView: ContentView(store: store))
+        // Disable automatic window resizing so the panel stays at the explicit
+        // 396x620 we positioned it to, rather than growing to ~652 tall based on
+        // the hosting controller's intrinsic content size.
+        hostingController.sizingOptions = []
+        panelContentContainer.mountContent(hostingController)
+        let frameAfterMount = panel.frame
+
+        // Mounting content must never move or resize the window. If this fires,
+        // the panel can land on a display it was not positioned on.
+        if !Self.framesMatch(frameBeforeMount, frameAfterMount) {
+            logger.error("Mounting panel content moved the window from \(frameBeforeMount.debugDescription, privacy: .public) to \(frameAfterMount.debugDescription, privacy: .public)")
+        }
+
+        if ProcessInfo.processInfo.environment["MACO_DEBUG_PANEL"] == "1" {
+            print("DEBUG_PANEL: frame before mount=\(frameBeforeMount)")
+            print("DEBUG_PANEL: frame after mount =\(frameAfterMount) screen=\(panel.screen?.localizedName ?? "nil")")
+        }
+    }
+
+    private static func framesMatch(_ lhs: NSRect, _ rhs: NSRect) -> Bool {
+        let tolerance: CGFloat = 0.5
+        return abs(lhs.origin.x - rhs.origin.x) < tolerance
+            && abs(lhs.origin.y - rhs.origin.y) < tolerance
+            && abs(lhs.width - rhs.width) < tolerance
+            && abs(lhs.height - rhs.height) < tolerance
     }
 
     private static func milliseconds(from duration: Duration) -> Double {
@@ -234,16 +257,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + Double(components.attoseconds) / 1_000_000_000_000_000
     }
 
-    private func position(panel: NSPanel, relativeTo button: NSStatusBarButton) {
-        guard let buttonWindow = button.window else { return }
+    private func position(panel: NSPanel) {
+        let clickLocation = Self.clickLocationInScreenCoordinates()
+        let resolved = Self.resolveScreen(for: clickLocation)
+        let targetScreen = resolved?.screen
+        if ProcessInfo.processInfo.environment["MACO_DEBUG_PANEL"] == "1" {
+            print("DEBUG_PANEL: mouseLocation=\(clickLocation)")
+            for s in NSScreen.screens {
+                print("DEBUG_PANEL: screen name=\(s.localizedName) main=\(s == NSScreen.main) frame=\(s.frame) visible=\(s.visibleFrame)")
+            }
+            print("DEBUG_PANEL: targetScreen=\(targetScreen?.localizedName ?? "nil") resolution=\(resolved.map { "\($0.resolution)" } ?? "none")")
+        }
+        guard let targetScreen else {
+            logger.warning("Panel positioning found no screen for click at \(clickLocation.debugDescription, privacy: .public); using fallback")
+            positionFallback(panel: panel)
+            return
+        }
 
-        let buttonFrameOnScreen = button.convert(button.bounds, to: nil)
-        let buttonFrame = buttonWindow.convertToScreen(buttonFrameOnScreen)
-        let visibleFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-
-        let x = min(max(buttonFrame.maxX - AppConstants.panelWidth, visibleFrame.minX + 8), visibleFrame.maxX - AppConstants.panelWidth - 8)
-        let y = buttonFrame.minY - AppConstants.panelHeight - 8
+        let visibleFrame = targetScreen.visibleFrame
+        let x = min(max(clickLocation.x - AppConstants.panelWidth, visibleFrame.minX + 8), visibleFrame.maxX - AppConstants.panelWidth - 8)
+        let y = visibleFrame.maxY - AppConstants.panelHeight - 8
         panel.setFrame(NSRect(x: x, y: y, width: AppConstants.panelWidth, height: AppConstants.panelHeight), display: true)
+        logger.notice("Positioned panel below menu bar on screen \(targetScreen.localizedName, privacy: .public)")
+    }
+
+    private static func clickLocationInScreenCoordinates() -> NSPoint {
+        // NSStatusItem is rendered on every display's menu bar but its button
+        // window is anchored to the primary display, so event.window coordinate
+        // conversion is wrong for secondary-display clicks. The physical mouse
+        // position is the only reliable source of the clicked screen.
+        NSEvent.mouseLocation
+    }
+
+    private static func resolveScreen(
+        for point: NSPoint
+    ) -> (screen: NSScreen, resolution: PanelScreenGeometry.Resolution)? {
+        let screens = NSScreen.screens
+        guard let resolved = PanelScreenGeometry.resolve(
+            point: point,
+            screens: screens.map { PanelScreenGeometry.Layout(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+        ) else {
+            return nil
+        }
+
+        return (screens[resolved.index], resolved.resolution)
     }
 
     private func positionFallback(panel: NSPanel) {
@@ -308,16 +365,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(localMonitor)
             self.localMonitor = nil
         }
-    }
-}
-
-private final class PanelPlaceholderViewController: NSViewController {
-    override func loadView() {
-        let visualEffectView = NSVisualEffectView()
-        visualEffectView.material = .hudWindow
-        visualEffectView.blendingMode = .behindWindow
-        visualEffectView.state = .active
-        view = visualEffectView
     }
 }
 
