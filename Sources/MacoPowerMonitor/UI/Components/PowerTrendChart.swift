@@ -164,8 +164,7 @@ private struct CompactHistoryCanvas: View {
         let primarySeries = series.first(where: { $0.id == .batteryLevel }) ?? series.first
         let points = primarySeries.map(pointsForSeries) ?? []
         let bars = compactBatteryBars(from: points)
-        let slotWidth = chartRect.width / CGFloat(max(min(points.count, Self.maximumBatteryBarCount), 1))
-        let barWidth = min(max(slotWidth * 0.58, 3.5), 8)
+        let barWidth: CGFloat = 6.5
 
         return ZStack {
             ForEach(bars) { bar in
@@ -270,7 +269,7 @@ private struct CompactHistoryCanvas: View {
         case .oneHour:
             formatter.dateFormat = "HH:mm"
         case .twentyFourHours:
-            formatter.dateFormat = "HH:mm"
+            formatter.dateFormat = "HH"
         case .tenDays:
             formatter.dateFormat = "M/d"
         }

@@ -12,7 +12,13 @@ enum AppControlActions {
     }
 
     static func quitApplication() {
+        for window in NSApp.windows {
+            if let sheetParent = window.sheetParent {
+                sheetParent.endSheet(window)
+            }
+        }
         PowerMonitorStore.shared.flushPendingBestEffort()
         NSApp.terminate(nil)
+        exit(0)
     }
 }
