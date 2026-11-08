@@ -12,12 +12,20 @@ struct PowerTrendChart: View {
             .filter(\.hasData)
     }
 
+    /// The battery chart always carries its own time scale so its percentage
+    /// columns remain readable when other metric charts are visible above or
+    /// below it. Other charts keep the shared scale on the final chart.
+    private var showsTimeAxis: Bool {
+        metric == .batteryLevel || showsXAxis
+    }
+
     var body: some View {
         if visibleSeries.isEmpty {
             VStack(spacing: 6) {
                 Image(systemName: "chart.xyaxis.line")
                     .font(.system(size: 16))
                     .foregroundStyle(PowerMonitorTheme.muted)
+                    .help("\(metric.title)趋势图暂缺足够的历史样本。")
                 Text(metric.emptyStateTitle)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(PowerMonitorTheme.muted)
@@ -32,23 +40,11 @@ struct PowerTrendChart: View {
                         metric: metric,
                         series: visibleSeries,
                         range: range,
+                        showsTimeAxis: showsTimeAxis,
                         size: geometry.size
                     )
                 }
                 .frame(height: chartHeight)
-
-                if showsXAxis {
-                    HStack {
-                        ForEach(xAxisLabels, id: \.self) { label in
-                            Text(label)
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(PowerMonitorTheme.muted)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.leading, 28)
-                    .padding(.trailing, 8)
-                }
             }
         }
     }
@@ -56,37 +52,14 @@ struct PowerTrendChart: View {
     private var chartHeight: CGFloat {
         switch metric {
         case .batteryLevel:
-            return 78
+            return 94
         case .power, .chargeRate:
-            return 92
+            return showsTimeAxis ? 106 : 92
         }
     }
 
     private var chartBackground: some ShapeStyle {
         Color.white.opacity(0.045)
-    }
-
-    private var xAxisLabels: [String] {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-
-        switch range {
-        case .oneHour:
-            formatter.dateFormat = "HH:mm"
-        case .twentyFourHours:
-            formatter.dateFormat = "HH"
-        case .tenDays:
-            formatter.dateFormat = "M/d"
-        }
-
-        let points = visibleSeries.flatMap(\.points)
-        guard let first = points.first?.timestamp, let last = points.last?.timestamp else {
-            return []
-        }
-
-        let ticks = 4
-        let interval = last.timeIntervalSince(first) / Double(max(ticks - 1, 1))
-        return (0..<ticks).map { formatter.string(from: first.addingTimeInterval(Double($0) * interval)) }
     }
 }
 
@@ -94,14 +67,22 @@ private struct CompactHistoryCanvas: View {
     let metric: ChartMetric
     let series: [PowerChartSeries]
     let range: ChartTimeRange
+    let showsTimeAxis: Bool
     let size: CGSize
+    private let referenceDate = Date()
 
     private var chartRect: CGRect {
-        CGRect(x: 28, y: 8, width: max(size.width - 36, 10), height: max(size.height - 14, 10))
+        let bottomInset: CGFloat = showsTimeAxis ? 28 : 14
+        return CGRect(x: 28, y: 8, width: max(size.width - 36, 10), height: max(size.height - bottomInset, 10))
     }
 
-    private var allPoints: [PowerChartPoint] {
-        series.flatMap(\.points).sorted { $0.timestamp < $1.timestamp }
+    /// Keep every chart aligned to the selected time window instead of
+    /// stretching the currently available samples across the entire width.
+    private var timeDomain: DateInterval {
+        DateInterval(
+            start: referenceDate.addingTimeInterval(-range.interval),
+            end: referenceDate
+        )
     }
 
     var body: some View {
@@ -118,6 +99,10 @@ private struct CompactHistoryCanvas: View {
             }
 
             yAxisLabelsLayer
+
+            if showsTimeAxis {
+                xAxisLabelsLayer
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
@@ -154,20 +139,22 @@ private struct CompactHistoryCanvas: View {
     private var historyLinesLayer: some View {
         ZStack {
             ForEach(series) { series in
-                let points = pointsForSeries(series)
-                if points.count >= 2 {
-                    HistoryAreaShape(points: points, baselineY: chartRect.maxY)
-                        .fill(style(for: series.id).fillGradient)
+                let segments = pointSegmentsForSeries(series)
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, points in
+                    if points.count >= 2 {
+                        HistoryAreaShape(points: points, baselineY: chartRect.maxY)
+                            .fill(style(for: series.id).fillGradient)
 
-                    HistoryLineShape(points: points)
-                        .stroke(style(for: series.id).lineColor, style: style(for: series.id).strokeStyle)
-
-                    if let lastPoint = points.last {
-                        Circle()
-                            .fill(style(for: series.id).lineColor)
-                            .frame(width: 8, height: 8)
-                            .position(lastPoint)
+                        HistoryLineShape(points: points)
+                            .stroke(style(for: series.id).lineColor, style: style(for: series.id).strokeStyle)
                     }
+                }
+
+                if let lastPoint = segments.last?.last {
+                    Circle()
+                        .fill(style(for: series.id).lineColor)
+                        .frame(width: 8, height: 8)
+                        .position(lastPoint)
                 }
             }
         }
@@ -176,20 +163,55 @@ private struct CompactHistoryCanvas: View {
     private var batteryBarsLayer: some View {
         let primarySeries = series.first(where: { $0.id == .batteryLevel }) ?? series.first
         let points = primarySeries.map(pointsForSeries) ?? []
-        let stepWidth = chartRect.width / CGFloat(max(points.count, 1))
+        let bars = compactBatteryBars(from: points)
+        // Bars always sit on the 48-column time grid, so width follows the
+        // fixed column pitch and can never overlap its neighbor.
+        let stepWidth = chartRect.width / CGFloat(Self.maximumBatteryBarCount)
         let barWidth = min(max(stepWidth * 0.54, 3), 7)
 
         return ZStack {
-            ForEach(Array(points.enumerated()), id: \.offset) { index, point in
-                let x = chartRect.minX + stepWidth * (CGFloat(index) + 0.5)
-                let y = point.y
+            ForEach(bars) { bar in
+                let y = bar.point.y
                 let height = chartRect.maxY - y
 
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(index == points.count - 1 ? PowerMonitorTheme.green : PowerMonitorTheme.accent)
+                RoundedRectangle(cornerRadius: min(barWidth / 2, 3.5))
+                    .fill(bar.isLatest ? PowerMonitorTheme.green : PowerMonitorTheme.accent)
                     .frame(width: barWidth, height: max(height, 2))
-                    .position(x: x, y: y + height / 2)
+                    .position(x: bar.point.x, y: y + height / 2)
             }
+        }
+    }
+
+    /// The store retains many samples per range. Showing every sample turns a
+    /// bar chart into a solid comb, so every sample is bucketed into 48
+    /// time-based columns. Each column is the average height of its samples
+    /// and stays in chronological position on the chart.
+    private func compactBatteryBars(from points: [CGPoint]) -> [BatteryBar] {
+        var sums = Array(repeating: CGFloat.zero, count: Self.maximumBatteryBarCount)
+        var counts = Array(repeating: 0, count: Self.maximumBatteryBarCount)
+
+        for point in points {
+            let relativeX = (point.x - chartRect.minX) / max(chartRect.width, 1)
+            let index = min(
+                max(Int(relativeX * CGFloat(Self.maximumBatteryBarCount)), 0),
+                Self.maximumBatteryBarCount - 1
+            )
+            sums[index] += point.y
+            counts[index] += 1
+        }
+
+        let lastNonEmptyIndex = counts.lastIndex { $0 > 0 }
+
+        return (0..<Self.maximumBatteryBarCount).compactMap { index in
+            guard counts[index] > 0 else { return nil }
+
+            let x = chartRect.minX + chartRect.width * (CGFloat(index) + 0.5) / CGFloat(Self.maximumBatteryBarCount)
+            let point = CGPoint(x: x, y: sums[index] / CGFloat(counts[index]))
+            return BatteryBar(
+                id: index,
+                point: point,
+                isLatest: index == lastNonEmptyIndex
+            )
         }
     }
 
@@ -204,6 +226,54 @@ private struct CompactHistoryCanvas: View {
         }
         .padding(.top, 4)
         .padding(.leading, 6)
+    }
+
+    private var xAxisLabelsLayer: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(xAxisTicks.enumerated()), id: \.offset) { index, timestamp in
+                let isFirst = index == 0
+                let isLast = index == xAxisTicks.count - 1
+                let gridX = chartRect.minX + chartRect.width * CGFloat(index) / CGFloat(max(xAxisTicks.count - 1, 1))
+                let labelX = gridX + (isFirst ? Self.xAxisLabelWidth / 2 : isLast ? -Self.xAxisLabelWidth / 2 : 0)
+
+                Text(xAxisFormatter.string(from: timestamp))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(PowerMonitorTheme.muted)
+                    .frame(
+                        width: Self.xAxisLabelWidth,
+                        alignment: isFirst ? .leading : isLast ? .trailing : .center
+                    )
+                    .position(
+                        x: labelX,
+                        y: chartRect.maxY + 10
+                    )
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var xAxisTicks: [Date] {
+        let tickCount = 4
+        let interval = timeDomain.duration / Double(tickCount - 1)
+        return (0..<tickCount).map { index in
+            timeDomain.start.addingTimeInterval(Double(index) * interval)
+        }
+    }
+
+    private var xAxisFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+
+        switch range {
+        case .oneHour:
+            formatter.dateFormat = "HH:mm"
+        case .twentyFourHours:
+            formatter.dateFormat = "HH"
+        case .tenDays:
+            formatter.dateFormat = "M/d"
+        }
+
+        return formatter
     }
 
     private var yAxisTicks: [AxisTick] {
@@ -253,14 +323,35 @@ private struct CompactHistoryCanvas: View {
         }
     }
 
-    private func xPosition(for timestamp: Date) -> CGFloat {
-        guard let first = allPoints.first?.timestamp, let last = allPoints.last?.timestamp else {
-            return chartRect.minX
+    private func pointSegmentsForSeries(_ series: PowerChartSeries) -> [[CGPoint]] {
+        let sortedPoints = series.points.sorted { $0.timestamp < $1.timestamp }
+        guard !sortedPoints.isEmpty else { return [] }
+
+        let maximumContinuousGap = (range.interval / Double(range.bucketCount)) * 1.5
+        var segments: [[PowerChartPoint]] = [[sortedPoints[0]]]
+        for point in sortedPoints.dropFirst() {
+            if let previous = segments.last?.last,
+               point.timestamp.timeIntervalSince(previous.timestamp) > maximumContinuousGap {
+                segments.append([point])
+            } else {
+                segments[segments.count - 1].append(point)
+            }
         }
 
-        let total = max(last.timeIntervalSince(first), 1)
-        let offset = timestamp.timeIntervalSince(first)
-        return chartRect.minX + chartRect.width * CGFloat(offset / total)
+        return segments.map { points in
+            points.map { point in
+                CGPoint(
+                    x: xPosition(for: point.timestamp),
+                    y: yPosition(for: point.value)
+                )
+            }
+        }
+    }
+
+    private func xPosition(for timestamp: Date) -> CGFloat {
+        let offset = timestamp.timeIntervalSince(timeDomain.start)
+        let normalized = min(max(offset / max(timeDomain.duration, 1), 0), 1)
+        return chartRect.minX + chartRect.width * CGFloat(normalized)
     }
 
     private func yPosition(for value: Double) -> CGFloat {
@@ -271,7 +362,7 @@ private struct CompactHistoryCanvas: View {
 
     private func style(for kind: PowerChartSeriesKind) -> ChartSeriesStyle {
         switch kind {
-        case .systemInputPower:
+        case .adapterInputPower:
             return ChartSeriesStyle(
                 lineColor: PowerMonitorTheme.accent,
                 fillGradient: LinearGradient(colors: [PowerMonitorTheme.accent.opacity(0.20), PowerMonitorTheme.accent.opacity(0.02)], startPoint: .top, endPoint: .bottom),
@@ -331,6 +422,9 @@ private struct CompactHistoryCanvas: View {
 
         return ceil(value)
     }
+
+    private static let maximumBatteryBarCount = 48
+    private static let xAxisLabelWidth: CGFloat = 42
 }
 
 private struct AxisTick: Identifiable {
@@ -345,6 +439,12 @@ private struct ChartSeriesStyle {
     let lineColor: Color
     let fillGradient: LinearGradient
     let strokeStyle: StrokeStyle
+}
+
+private struct BatteryBar: Identifiable {
+    let id: Int
+    let point: CGPoint
+    let isLatest: Bool
 }
 
 private struct HistoryLineShape: Shape {

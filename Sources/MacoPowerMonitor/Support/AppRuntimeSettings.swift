@@ -29,8 +29,36 @@ final class AppRuntimeSettings: ObservableObject {
     ) {
         self.defaults = defaults
         self.processInfo = processInfo
-        self.isBundledApp = Bundle.main.bundleURL.pathExtension == "app"
+        self.isBundledApp = Self.isRunningFromAppBundle(processInfo: processInfo)
         self.backgroundKeepAliveEnabled = defaults.object(forKey: Self.backgroundKeepAliveDefaultsKey) as? Bool ?? true
+    }
+
+    /// `Bundle.main.bundleURL` can bridge from a nil Objective-C value and
+    /// trap when the program is launched as a bare Mach-O executable. Inspect
+    /// the executable path instead so both portable binaries and `.app`
+    /// bundles can initialize safely.
+    private static func isRunningFromAppBundle(processInfo: ProcessInfo) -> Bool {
+        guard let executablePath = processInfo.arguments.first, !executablePath.isEmpty else {
+            return false
+        }
+
+        let components = URL(fileURLWithPath: executablePath)
+            .standardizedFileURL
+            .pathComponents
+
+        guard let appComponentIndex = components.lastIndex(where: { component in
+            URL(fileURLWithPath: component).pathExtension.lowercased() == "app"
+        }) else {
+            return false
+        }
+
+        let contentsIndex = components.index(after: appComponentIndex)
+        guard contentsIndex < components.endIndex, components[contentsIndex] == "Contents" else {
+            return false
+        }
+
+        let macOSIndex = components.index(after: contentsIndex)
+        return macOSIndex < components.endIndex && components[macOSIndex] == "MacOS"
     }
 
     func configureOnLaunch() {

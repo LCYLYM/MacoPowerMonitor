@@ -8,6 +8,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = PowerMonitorStore.shared
     private let runtimeSettings = AppRuntimeSettings.shared
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "app")
+    private let panelSignposter = OSSignposter(subsystem: AppConstants.subsystem, category: "panel-presentation")
+    private let statusIconAnimator = StatusBarBatteryIconAnimator()
+    private let panelContentContainer = PanelContainerViewController()
     private var statusItem: NSStatusItem?
     private var panel: NSPanel?
     private var cancellables = Set<AnyCancellable>()
@@ -20,6 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeSettings.configureOnLaunch()
 
         if let selfTest = ProcessInfo.processInfo.environment["MACO_POWER_MONITOR_SELF_TEST"] {
+            if selfTest == "quit" {
+                print("SELF_TEST=quit")
+                print("TERMINATE_REPLY=terminateNow")
+                AppControlActions.quitApplication()
+                return
+            }
             print(runtimeSettings.runSelfTest(named: selfTest))
             NSApp.terminate(nil)
             return
@@ -32,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        statusIconAnimator.invalidate()
+        panelContentContainer.unmountContent()
         if let globalMonitor {
             NSEvent.removeMonitor(globalMonitor)
         }
@@ -40,12 +51,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        .terminateNow
+    }
+
     private func configureStatusItemIfNeeded() {
         statusItemConfigurationAttempts += 1
 
         if let existingItem = statusItem {
-            if existingItem.button != nil {
+            if let existingButton = existingItem.button {
                 existingItem.isVisible = true
+                statusIconAnimator.attach(to: existingButton)
                 updateStatusItem(snapshot: store.latestSnapshot)
                 logger.notice("Status item became available on attempt \(self.statusItemConfigurationAttempts, privacy: .public)")
                 return
@@ -55,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem = nil
         }
 
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.isVisible = true
 
         guard let button = item.button else {
@@ -70,9 +86,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
         button.title = ""
+        statusIconAnimator.attach(to: button)
         statusItem = item
         logger.notice("Configured status item on attempt \(self.statusItemConfigurationAttempts, privacy: .public)")
         updateStatusItem(snapshot: store.latestSnapshot)
+        _ = ensurePanel()
 
         if ProcessInfo.processInfo.environment["MACO_POWER_MONITOR_DEBUG_WINDOW"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
@@ -99,44 +117,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.updateStatusItem(snapshot: snapshot)
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.updateStatusItem(snapshot: self.store.latestSnapshot)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.closePanelForResignActiveIfNeeded()
+            }
+            .store(in: &cancellables)
+
+    }
+
+    /// Cmd-Tab produces no mouse event, so resigning active must also dismiss
+    /// the panel. The osascript "with administrator privileges" prompt is
+    /// presented by SecurityAgent in the foreground; resigning active to it is
+    /// part of the in-panel authorization flow and must not close the panel.
+    private func closePanelForResignActiveIfNeeded() {
+        guard let panel, panel.isVisible else { return }
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier != "com.apple.SecurityAgent" else { return }
+        closePanel()
     }
 
     private func updateStatusItem(snapshot: PowerSnapshot?) {
         guard let button = statusItem?.button else { return }
 
-        let symbolName: String
-
-        if let snapshot {
-            if snapshot.isCharging {
-                symbolName = "battery.100percent.bolt"
-            } else {
-                switch snapshot.batteryLevel {
-                case ..<0.15: symbolName = "battery.25percent"
-                case ..<0.35: symbolName = "battery.25percent"
-                case ..<0.60: symbolName = "battery.50percent"
-                case ..<0.85: symbolName = "battery.75percent"
-                default: symbolName = "battery.100percent"
-                }
-            }
+        let connectionGlyph: StatusBarBatteryConnectionGlyph
+        if let snapshot, snapshot.source == .acPower {
+            connectionGlyph = snapshot.chargeHoldReason != nil || snapshot.isCharged
+                ? .plug
+                : .bolt
         } else {
-            symbolName = "battery.0percent"
+            connectionGlyph = .none
         }
 
-        let resolvedSymbolName: String
-        if NSImage(systemSymbolName: symbolName, accessibilityDescription: "Power Monitor") != nil {
-            resolvedSymbolName = symbolName
-        } else {
-            resolvedSymbolName = "battery.100percent"
-        }
-
-        let image = NSImage(systemSymbolName: resolvedSymbolName, accessibilityDescription: "Power Monitor")
-        image?.isTemplate = true
-        button.image = image
+        statusIconAnimator.update(state: StatusBarBatteryIconState(
+            level: snapshot?.batteryLevel,
+            connectionGlyph: connectionGlyph,
+            isLowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled
+        ))
         button.appearsDisabled = false
         button.toolTip = snapshot.map {
-            "电量 \(PowerFormatting.percent($0.batteryLevel)) · \($0.displayStatusText) · 系统输入 \(PowerFormatting.watts($0.systemPowerWatts))"
+            let limit = $0.chargeLimitPercent.map { " · 充电目标 \($0)%" } ?? ""
+            return "电量 \(PowerFormatting.percent($0.batteryLevel)) · \($0.displayStatusText)\(limit) · 适配器实时 \(PowerFormatting.watts($0.adapterRealtimePowerWatts)) · \($0.adapterProtocol?.shortName ?? "协议未知")"
         } ?? "正在读取电源信息"
+        button.setAccessibilityLabel("Maco Power Monitor")
+        button.setAccessibilityValue(snapshot.map {
+            "电量 \(PowerFormatting.percent($0.batteryLevel))，\($0.displayStatusText)"
+        } ?? "正在读取电源信息")
     }
+
 
     @objc
     private func togglePanelFromStatusItem() {
@@ -148,34 +184,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showPanel() {
+        let clock = ContinuousClock()
+        let presentationStartedAt = clock.now
+        let presentationState = panelSignposter.beginInterval("PanelPresentation")
         let panel = ensurePanel()
-        if let button = statusItem?.button {
-            position(panel: panel, relativeTo: button)
-        } else {
-            logger.warning("Showing panel without status item button; using fallback positioning")
-            positionFallback(panel: panel)
-        }
+        position(panel: panel)
         panel.makeKeyAndOrderFront(nil)
+        let openedAt = clock.now
+        panelSignposter.endInterval("PanelPresentation", presentationState)
+        let presentationMilliseconds = Self.milliseconds(from: presentationStartedAt.duration(to: openedAt))
+        if presentationMilliseconds > 100 {
+            logger.error("Panel presentation exceeded 100 ms: \(presentationMilliseconds, format: .fixed(precision: 1), privacy: .public) ms")
+        } else {
+            logger.notice("Panel presentation completed in \(presentationMilliseconds, format: .fixed(precision: 1), privacy: .public) ms")
+        }
         NSApp.activate(ignoringOtherApps: true)
         startEventMonitors()
+        store.beginPanelPresentation(openedAt: openedAt)
+
+        DispatchQueue.main.async { [weak self, weak panel] in
+            guard let self, let panel, panel.isVisible else { return }
+            self.mountPanelContent(in: panel)
+        }
     }
 
     private func closePanel() {
         panel?.orderOut(nil)
+        store.endPanelPresentation()
+        panelContentContainer.unmountContent()
         stopEventMonitors()
     }
 
     private func ensurePanel() -> NSPanel {
         if let panel {
-            if let hostingController = panel.contentViewController as? NSHostingController<ContentView> {
-                hostingController.rootView = ContentView(store: store)
-            }
             return panel
         }
 
-        let contentView = ContentView(store: store)
-        let hostingController = NSHostingController(rootView: contentView)
-        let panel = FloatingPanel(contentViewController: hostingController)
+        let panel = FloatingPanel(contentViewController: panelContentContainer)
         panel.setContentSize(NSSize(width: AppConstants.panelWidth, height: AppConstants.panelHeight))
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.isReleasedWhenClosed = false
@@ -185,16 +230,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return panel
     }
 
-    private func position(panel: NSPanel, relativeTo button: NSStatusBarButton) {
-        guard let buttonWindow = button.window else { return }
+    /// Mounts SwiftUI as a child of the permanent container instead of swapping
+    /// the panel's `contentViewController`. The latter collapses the window to
+    /// 0x0 and displaces `origin.y` by the panel height, which can throw the
+    /// panel onto an adjacent display. See `PanelContainerViewController`.
+    private func mountPanelContent(in panel: NSPanel) {
+        guard panel.isVisible, !panelContentContainer.isContentMounted else {
+            return
+        }
 
-        let buttonFrameOnScreen = button.convert(button.bounds, to: nil)
-        let buttonFrame = buttonWindow.convertToScreen(buttonFrameOnScreen)
-        let visibleFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let frameBeforeMount = panel.frame
+        let hostingController = NSHostingController(rootView: ContentView(store: store))
+        // Disable automatic window resizing so the panel stays at the explicit
+        // 396x620 we positioned it to, rather than growing to ~652 tall based on
+        // the hosting controller's intrinsic content size.
+        hostingController.sizingOptions = []
+        panelContentContainer.mountContent(hostingController)
+        let frameAfterMount = panel.frame
 
-        let x = min(max(buttonFrame.maxX - AppConstants.panelWidth, visibleFrame.minX + 8), visibleFrame.maxX - AppConstants.panelWidth - 8)
-        let y = buttonFrame.minY - AppConstants.panelHeight - 8
+        // Mounting content must never move or resize the window. If this fires,
+        // the panel can land on a display it was not positioned on.
+        if !Self.framesMatch(frameBeforeMount, frameAfterMount) {
+            logger.error("Mounting panel content moved the window from \(frameBeforeMount.debugDescription, privacy: .public) to \(frameAfterMount.debugDescription, privacy: .public)")
+        }
+
+        if ProcessInfo.processInfo.environment["MACO_DEBUG_PANEL"] == "1" {
+            print("DEBUG_PANEL: frame before mount=\(frameBeforeMount)")
+            print("DEBUG_PANEL: frame after mount =\(frameAfterMount) screen=\(panel.screen?.localizedName ?? "nil")")
+        }
+    }
+
+    private static func framesMatch(_ lhs: NSRect, _ rhs: NSRect) -> Bool {
+        let tolerance: CGFloat = 0.5
+        return abs(lhs.origin.x - rhs.origin.x) < tolerance
+            && abs(lhs.origin.y - rhs.origin.y) < tolerance
+            && abs(lhs.width - rhs.width) < tolerance
+            && abs(lhs.height - rhs.height) < tolerance
+    }
+
+    private static func milliseconds(from duration: Duration) -> Double {
+        let components = duration.components
+        return Double(components.seconds) * 1_000
+            + Double(components.attoseconds) / 1_000_000_000_000_000
+    }
+
+    private func position(panel: NSPanel) {
+        let clickLocation = Self.clickLocationInScreenCoordinates()
+        let resolved = Self.resolveScreen(for: clickLocation)
+        let targetScreen = resolved?.screen
+        if ProcessInfo.processInfo.environment["MACO_DEBUG_PANEL"] == "1" {
+            print("DEBUG_PANEL: mouseLocation=\(clickLocation)")
+            for s in NSScreen.screens {
+                print("DEBUG_PANEL: screen name=\(s.localizedName) main=\(s == NSScreen.main) frame=\(s.frame) visible=\(s.visibleFrame)")
+            }
+            print("DEBUG_PANEL: targetScreen=\(targetScreen?.localizedName ?? "nil") resolution=\(resolved.map { "\($0.resolution)" } ?? "none")")
+        }
+        guard let targetScreen else {
+            logger.warning("Panel positioning found no screen for click at \(clickLocation.debugDescription, privacy: .public); using fallback")
+            positionFallback(panel: panel)
+            return
+        }
+
+        let visibleFrame = targetScreen.visibleFrame
+        let x = min(max(clickLocation.x - AppConstants.panelWidth, visibleFrame.minX + 8), visibleFrame.maxX - AppConstants.panelWidth - 8)
+        let y = visibleFrame.maxY - AppConstants.panelHeight - 8
         panel.setFrame(NSRect(x: x, y: y, width: AppConstants.panelWidth, height: AppConstants.panelHeight), display: true)
+        logger.notice("Positioned panel below menu bar on screen \(targetScreen.localizedName, privacy: .public)")
+    }
+
+    private static func clickLocationInScreenCoordinates() -> NSPoint {
+        // NSStatusItem is rendered on every display's menu bar but its button
+        // window is anchored to the primary display, so event.window coordinate
+        // conversion is wrong for secondary-display clicks. The physical mouse
+        // position is the only reliable source of the clicked screen.
+        NSEvent.mouseLocation
+    }
+
+    private static func resolveScreen(
+        for point: NSPoint
+    ) -> (screen: NSScreen, resolution: PanelScreenGeometry.Resolution)? {
+        let screens = NSScreen.screens
+        guard let resolved = PanelScreenGeometry.resolve(
+            point: point,
+            screens: screens.map { PanelScreenGeometry.Layout(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+        ) else {
+            return nil
+        }
+
+        return (screens[resolved.index], resolved.resolution)
     }
 
     private func positionFallback(panel: NSPanel) {

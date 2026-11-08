@@ -1,4 +1,5 @@
 .DS_Store
+HANDOFF.MD
 /.build
 /Packages
 xcuserdata/
@@ -11,3 +12,4 @@ DerivedData/
 *.swp
 *.swo
 *.orig
+ORIGIN/

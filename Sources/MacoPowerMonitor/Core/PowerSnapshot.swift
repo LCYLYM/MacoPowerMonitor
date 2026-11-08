@@ -21,6 +21,8 @@ struct PowerSnapshot: Codable, Equatable, Sendable {
     let hardwareSerialNumber: String?
     let isCharging: Bool
     let isCharged: Bool
+    let chargeHoldReason: ChargeHoldReason?
+    let chargeLimitPercent: Int?
     let timeToEmptyMinutes: Int?
     let timeToFullChargeMinutes: Int?
     let voltageMillivolts: Int?
@@ -31,6 +33,14 @@ struct PowerSnapshot: Codable, Equatable, Sendable {
     let adapterWatts: Int?
     let adapterVoltageMillivolts: Int?
     let adapterCurrentMilliamps: Int?
+    let adapterInputVoltageMillivolts: Int?
+    let adapterInputCurrentMilliamps: Int?
+    let adapterInputPowerWatts: Double?
+    let adapterProtocol: PowerAdapterProtocol?
+    let adapterProtocolDetail: String?
+    let adapterVendorID: Int?
+    let adapterProductID: Int?
+    let adapterPDRevisionCode: Int?
     let systemPowerWatts: Double?
     let batteryPowerWatts: Double?
     let cpuPowerWatts: Double?
@@ -38,8 +48,173 @@ struct PowerSnapshot: Codable, Equatable, Sendable {
     let anePowerWatts: Double?
     let subsystemPowerUnavailableReason: String?
 
+    private enum CodingKeys: String, CodingKey {
+        case timestamp, source, batteryName, batteryLevel, currentChargePercent
+        case nominalCapacity, designCapacity, fullChargeCapacity, designCycleCount, cycleCount
+        case maximumCapacityPercent, hardwareSerialNumber, isCharging, isCharged
+        case chargeHoldReason, chargeLimitPercent
+        case timeToEmptyMinutes, timeToFullChargeMinutes, voltageMillivolts, amperageMilliamps
+        case temperatureCelsius, batteryHealthCondition, batteryHealthState
+        case adapterWatts, adapterVoltageMillivolts, adapterCurrentMilliamps
+        case adapterInputVoltageMillivolts, adapterInputCurrentMilliamps, adapterInputPowerWatts
+        case adapterProtocol, adapterProtocolDetail, adapterVendorID, adapterProductID, adapterPDRevisionCode
+        case systemPowerWatts, batteryPowerWatts, cpuPowerWatts, gpuPowerWatts, anePowerWatts
+        case subsystemPowerUnavailableReason
+    }
+
+    init(
+        timestamp: Date,
+        source: PowerSourceKind,
+        batteryName: String?,
+        batteryLevel: Double,
+        currentChargePercent: Double?,
+        nominalCapacity: Int?,
+        designCapacity: Int?,
+        fullChargeCapacity: Int?,
+        designCycleCount: Int?,
+        cycleCount: Int?,
+        maximumCapacityPercent: Double?,
+        hardwareSerialNumber: String?,
+        isCharging: Bool,
+        isCharged: Bool,
+        chargeHoldReason: ChargeHoldReason? = nil,
+        chargeLimitPercent: Int? = nil,
+        timeToEmptyMinutes: Int?,
+        timeToFullChargeMinutes: Int?,
+        voltageMillivolts: Int?,
+        amperageMilliamps: Int?,
+        temperatureCelsius: Double?,
+        batteryHealthCondition: String?,
+        batteryHealthState: String?,
+        adapterWatts: Int?,
+        adapterVoltageMillivolts: Int?,
+        adapterCurrentMilliamps: Int?,
+        adapterInputVoltageMillivolts: Int?,
+        adapterInputCurrentMilliamps: Int?,
+        adapterInputPowerWatts: Double?,
+        adapterProtocol: PowerAdapterProtocol?,
+        adapterProtocolDetail: String?,
+        adapterVendorID: Int?,
+        adapterProductID: Int?,
+        adapterPDRevisionCode: Int?,
+        systemPowerWatts: Double?,
+        batteryPowerWatts: Double?,
+        cpuPowerWatts: Double?,
+        gpuPowerWatts: Double?,
+        anePowerWatts: Double?,
+        subsystemPowerUnavailableReason: String?
+    ) {
+        self.timestamp = timestamp
+        self.source = source
+        self.batteryName = batteryName
+        self.batteryLevel = batteryLevel
+        self.currentChargePercent = currentChargePercent
+        self.nominalCapacity = nominalCapacity
+        self.designCapacity = designCapacity
+        self.fullChargeCapacity = fullChargeCapacity
+        self.designCycleCount = designCycleCount
+        self.cycleCount = cycleCount
+        self.maximumCapacityPercent = maximumCapacityPercent
+        self.hardwareSerialNumber = hardwareSerialNumber
+        self.isCharging = isCharging
+        self.isCharged = isCharged
+        self.chargeHoldReason = chargeHoldReason
+        self.chargeLimitPercent = chargeLimitPercent
+        self.timeToEmptyMinutes = timeToEmptyMinutes
+        self.timeToFullChargeMinutes = timeToFullChargeMinutes
+        self.voltageMillivolts = voltageMillivolts
+        self.amperageMilliamps = amperageMilliamps
+        self.temperatureCelsius = temperatureCelsius
+        self.batteryHealthCondition = batteryHealthCondition
+        self.batteryHealthState = batteryHealthState
+        self.adapterWatts = adapterWatts
+        self.adapterVoltageMillivolts = adapterVoltageMillivolts
+        self.adapterCurrentMilliamps = adapterCurrentMilliamps
+        self.adapterInputVoltageMillivolts = adapterInputVoltageMillivolts
+        self.adapterInputCurrentMilliamps = adapterInputCurrentMilliamps
+        self.adapterInputPowerWatts = adapterInputPowerWatts
+        self.adapterProtocol = adapterProtocol
+        self.adapterProtocolDetail = adapterProtocolDetail
+        self.adapterVendorID = adapterVendorID
+        self.adapterProductID = adapterProductID
+        self.adapterPDRevisionCode = adapterPDRevisionCode
+        self.systemPowerWatts = systemPowerWatts
+        self.batteryPowerWatts = batteryPowerWatts
+        self.cpuPowerWatts = cpuPowerWatts
+        self.gpuPowerWatts = gpuPowerWatts
+        self.anePowerWatts = anePowerWatts
+        self.subsystemPowerUnavailableReason = subsystemPowerUnavailableReason
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        source = try container.decode(PowerSourceKind.self, forKey: .source)
+        batteryName = try container.decodeIfPresent(String.self, forKey: .batteryName)
+        batteryLevel = try container.decode(Double.self, forKey: .batteryLevel)
+        currentChargePercent = try container.decodeIfPresent(Double.self, forKey: .currentChargePercent)
+        nominalCapacity = try container.decodeIfPresent(Int.self, forKey: .nominalCapacity)
+        designCapacity = try container.decodeIfPresent(Int.self, forKey: .designCapacity)
+        fullChargeCapacity = try container.decodeIfPresent(Int.self, forKey: .fullChargeCapacity)
+        designCycleCount = try container.decodeIfPresent(Int.self, forKey: .designCycleCount)
+        cycleCount = try container.decodeIfPresent(Int.self, forKey: .cycleCount)
+        maximumCapacityPercent = try container.decodeIfPresent(Double.self, forKey: .maximumCapacityPercent)
+        hardwareSerialNumber = try container.decodeIfPresent(String.self, forKey: .hardwareSerialNumber)
+        isCharging = try container.decode(Bool.self, forKey: .isCharging)
+        isCharged = try container.decode(Bool.self, forKey: .isCharged)
+        chargeHoldReason = try container.decodeIfPresent(ChargeHoldReason.self, forKey: .chargeHoldReason)
+        chargeLimitPercent = try container.decodeIfPresent(Int.self, forKey: .chargeLimitPercent)
+        timeToEmptyMinutes = try container.decodeIfPresent(Int.self, forKey: .timeToEmptyMinutes)
+        timeToFullChargeMinutes = try container.decodeIfPresent(Int.self, forKey: .timeToFullChargeMinutes)
+        voltageMillivolts = try container.decodeIfPresent(Int.self, forKey: .voltageMillivolts)
+        amperageMilliamps = try container.decodeIfPresent(Int.self, forKey: .amperageMilliamps)
+        temperatureCelsius = try container.decodeIfPresent(Double.self, forKey: .temperatureCelsius)
+        batteryHealthCondition = try container.decodeIfPresent(String.self, forKey: .batteryHealthCondition)
+        batteryHealthState = try container.decodeIfPresent(String.self, forKey: .batteryHealthState)
+        adapterWatts = try container.decodeIfPresent(Int.self, forKey: .adapterWatts)
+        adapterVoltageMillivolts = try container.decodeIfPresent(Int.self, forKey: .adapterVoltageMillivolts)
+        adapterCurrentMilliamps = try container.decodeIfPresent(Int.self, forKey: .adapterCurrentMilliamps)
+        adapterInputVoltageMillivolts = try container.decodeIfPresent(Int.self, forKey: .adapterInputVoltageMillivolts)
+        adapterInputCurrentMilliamps = try container.decodeIfPresent(Int.self, forKey: .adapterInputCurrentMilliamps)
+        adapterInputPowerWatts = try container.decodeIfPresent(Double.self, forKey: .adapterInputPowerWatts)
+            ?? (source == .acPower ? try container.decodeIfPresent(Double.self, forKey: .systemPowerWatts) : nil)
+        adapterProtocol = try container.decodeIfPresent(PowerAdapterProtocol.self, forKey: .adapterProtocol)
+        adapterProtocolDetail = try container.decodeIfPresent(String.self, forKey: .adapterProtocolDetail)
+        adapterVendorID = try container.decodeIfPresent(Int.self, forKey: .adapterVendorID)
+        adapterProductID = try container.decodeIfPresent(Int.self, forKey: .adapterProductID)
+        adapterPDRevisionCode = try container.decodeIfPresent(Int.self, forKey: .adapterPDRevisionCode)
+        systemPowerWatts = try container.decodeIfPresent(Double.self, forKey: .systemPowerWatts)
+        batteryPowerWatts = try container.decodeIfPresent(Double.self, forKey: .batteryPowerWatts)
+        cpuPowerWatts = try container.decodeIfPresent(Double.self, forKey: .cpuPowerWatts)
+        gpuPowerWatts = try container.decodeIfPresent(Double.self, forKey: .gpuPowerWatts)
+        anePowerWatts = try container.decodeIfPresent(Double.self, forKey: .anePowerWatts)
+        subsystemPowerUnavailableReason = try container.decodeIfPresent(String.self, forKey: .subsystemPowerUnavailableReason)
+    }
+
     var preferredPowerWatts: Double? {
-        systemPowerWatts ?? batteryPowerWatts.map(abs)
+        adapterRealtimePowerWatts ?? systemPowerWatts ?? batteryPowerWatts.map(abs)
+    }
+
+    var adapterRealtimePowerWatts: Double? {
+        adapterInputPowerWatts ?? (source == .acPower ? systemPowerWatts : nil)
+    }
+
+    var adapterRealtimeCurrentMilliamps: Int? {
+        guard source == .acPower else { return nil }
+        return adapterInputCurrentMilliamps
+    }
+
+    var adapterRealtimeVoltageMillivolts: Int? {
+        guard source == .acPower else { return nil }
+        return adapterInputVoltageMillivolts
+    }
+
+    var adapterProtocolDisplayName: String {
+        guard source == .acPower else {
+            return "未连接"
+        }
+
+        return (adapterProtocol ?? .unknown).displayName
     }
 
     var batteryFlowWatts: Double? {
@@ -71,6 +246,10 @@ struct PowerSnapshot: Codable, Equatable, Sendable {
     }
 
     var displayStatusText: String {
+        if source == .acPower, let chargeHoldReason {
+            return chargeHoldReason.displayText
+        }
+
         switch source {
         case .acPower where isCharged:
             return "已充满"
@@ -94,7 +273,7 @@ struct SessionSummary: Equatable, Sendable {
     let capacityDeltaMah: Int?
 }
 
-enum ChartMetric: String, CaseIterable, Identifiable {
+enum ChartMetric: String, CaseIterable, Identifiable, Sendable {
     case power
     case batteryLevel
     case chargeRate
@@ -137,7 +316,7 @@ enum ChartMetric: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .power:
-            return "系统输入 + 电池输出/回充"
+            return "适配器实时输入 + 电池输出/回充"
         case .batteryLevel:
             return "电池百分比走势"
         case .chargeRate:
@@ -161,7 +340,7 @@ enum ChartMetric: String, CaseIterable, Identifiable {
     }
 }
 
-enum ChartTimeRange: String, CaseIterable, Identifiable {
+enum ChartTimeRange: String, CaseIterable, Identifiable, Sendable {
     case oneHour
     case twentyFourHours
     case tenDays
@@ -193,11 +372,11 @@ enum ChartTimeRange: String, CaseIterable, Identifiable {
     var bucketCount: Int {
         switch self {
         case .oneHour:
-            return 24
+            return 120
         case .twentyFourHours:
-            return 48
+            return 144
         case .tenDays:
-            return 20
+            return 120
         }
     }
 }
@@ -210,7 +389,7 @@ struct PowerChartPoint: Identifiable, Sendable {
 }
 
 enum PowerChartSeriesKind: String, CaseIterable, Identifiable, Sendable {
-    case systemInputPower
+    case adapterInputPower
     case batteryDischargePower
     case batteryChargePower
     case batteryDischargeCurrent
@@ -221,7 +400,7 @@ enum PowerChartSeriesKind: String, CaseIterable, Identifiable, Sendable {
 
     var metric: ChartMetric {
         switch self {
-        case .systemInputPower, .batteryDischargePower, .batteryChargePower:
+        case .adapterInputPower, .batteryDischargePower, .batteryChargePower:
             return .power
         case .batteryDischargeCurrent, .batteryChargeCurrent:
             return .chargeRate
@@ -232,8 +411,8 @@ enum PowerChartSeriesKind: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .systemInputPower:
-            return "系统输入"
+        case .adapterInputPower:
+            return "适配器实时"
         case .batteryDischargePower:
             return "电池输出"
         case .batteryChargePower:

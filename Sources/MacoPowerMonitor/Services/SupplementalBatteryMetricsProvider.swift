@@ -1,4 +1,5 @@
 import Foundation
+import IOKit
 import OSLog
 
 struct SupplementalBatteryMetrics: Sendable {
@@ -15,84 +16,147 @@ struct SupplementalBatteryMetrics: Sendable {
     let adapterWatts: Int?
     let adapterVoltageMillivolts: Int?
     let adapterCurrentMilliamps: Int?
+    let adapterInputVoltageMillivolts: Int?
+    let adapterInputCurrentMilliamps: Int?
+    let adapterProtocol: PowerAdapterProtocol?
+    let adapterProtocolDetail: String?
+    let adapterVendorID: Int?
+    let adapterProductID: Int?
+    let adapterPDRevisionCode: Int?
+    let chargeStatus: String?
+    let notChargingReason: UInt64?
+    let chargeLimitStatus: ChargeLimitStatus
 }
 
 final class SupplementalBatteryMetricsProvider: @unchecked Sendable {
     static let shared = SupplementalBatteryMetricsProvider()
 
     private let logger = Logger(subsystem: AppConstants.subsystem, category: "supplemental-battery")
-    private let queue = DispatchQueue(label: "com.codex.MacoPowerMonitor.supplemental-battery")
-    private var cachedMetrics: SupplementalBatteryMetrics?
-    private var lastRefreshDate: Date?
+    private let stateQueue = DispatchQueue(label: "com.codex.MacoPowerMonitor.supplemental-battery.state")
+    private let profilerQueue = DispatchQueue(label: "com.codex.MacoPowerMonitor.supplemental-battery.profiler", qos: .utility)
+    private let chargeLimitStatusProvider = ChargeLimitStatusProvider.shared
+    private var cachedSystemProfilerMetrics: SystemProfilerMetrics?
+    private var lastSystemProfilerRefreshDate: Date?
+    private var isSystemProfilerRefreshInFlight = false
 
-    private let refreshInterval: TimeInterval = 60
+    private let systemProfilerRefreshInterval: TimeInterval = 5 * 60
 
     func currentMetrics() -> SupplementalBatteryMetrics? {
-        queue.sync {
-            let now = Date()
-            if let cachedMetrics,
-               let lastRefreshDate,
-               now.timeIntervalSince(lastRefreshDate) < refreshInterval {
-                return cachedMetrics
-            }
-
-            do {
-                let metrics = try fetchMetrics()
-                cachedMetrics = metrics
-                lastRefreshDate = now
-                return metrics
-            } catch {
-                logger.error("Failed to fetch supplemental battery metrics: \(error.localizedDescription, privacy: .public)")
-                return cachedMetrics
-            }
+        let ioRegistryMetrics: IORegistryMetrics
+        do {
+            ioRegistryMetrics = try readIORegistryMetrics()
+        } catch {
+            logger.error("Failed to fetch IORegistry battery metrics: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
-    }
 
-    private func fetchMetrics() throws -> SupplementalBatteryMetrics {
-        let ioreg = try readIoregMetrics()
-        let systemProfiler = try readSystemProfilerMetrics()
+        let profilerMetrics = stateQueue.sync { cachedSystemProfilerMetrics }
 
         return SupplementalBatteryMetrics(
-            designCapacityMah: ioreg.designCapacityMah,
-            fullChargeCapacityMah: ioreg.fullChargeCapacityMah,
-            cycleCount: systemProfiler.cycleCount ?? ioreg.cycleCount,
-            maximumCapacityPercent: systemProfiler.maximumCapacityPercent,
-            temperatureCelsius: ioreg.temperatureCelsius,
-            voltageMillivolts: ioreg.voltageMillivolts,
-            amperageMilliamps: ioreg.amperageMilliamps,
-            timeRemainingMinutes: ioreg.timeRemainingMinutes,
-            systemInputWatts: ioreg.systemInputWatts,
-            batteryPowerWatts: ioreg.batteryPowerWatts,
-            adapterWatts: ioreg.adapterWatts,
-            adapterVoltageMillivolts: ioreg.adapterVoltageMillivolts,
-            adapterCurrentMilliamps: ioreg.adapterCurrentMilliamps
+            designCapacityMah: ioRegistryMetrics.designCapacityMah,
+            fullChargeCapacityMah: ioRegistryMetrics.fullChargeCapacityMah,
+            cycleCount: profilerMetrics?.cycleCount ?? ioRegistryMetrics.cycleCount,
+            maximumCapacityPercent: profilerMetrics?.maximumCapacityPercent,
+            temperatureCelsius: ioRegistryMetrics.temperatureCelsius,
+            voltageMillivolts: ioRegistryMetrics.voltageMillivolts,
+            amperageMilliamps: ioRegistryMetrics.amperageMilliamps,
+            timeRemainingMinutes: ioRegistryMetrics.timeRemainingMinutes,
+            systemInputWatts: ioRegistryMetrics.systemInputWatts,
+            batteryPowerWatts: ioRegistryMetrics.batteryPowerWatts,
+            adapterWatts: ioRegistryMetrics.adapterWatts,
+            adapterVoltageMillivolts: ioRegistryMetrics.adapterVoltageMillivolts,
+            adapterCurrentMilliamps: ioRegistryMetrics.adapterCurrentMilliamps,
+            adapterInputVoltageMillivolts: ioRegistryMetrics.adapterInputVoltageMillivolts,
+            adapterInputCurrentMilliamps: ioRegistryMetrics.adapterInputCurrentMilliamps,
+            adapterProtocol: ioRegistryMetrics.protocolDetection.protocol,
+            adapterProtocolDetail: ioRegistryMetrics.protocolDetection.detail,
+            adapterVendorID: ioRegistryMetrics.protocolDetection.vendorID,
+            adapterProductID: ioRegistryMetrics.protocolDetection.productID,
+            adapterPDRevisionCode: ioRegistryMetrics.protocolDetection.pdRevisionCode,
+            chargeStatus: ioRegistryMetrics.chargeStatus,
+            notChargingReason: ioRegistryMetrics.notChargingReason,
+            chargeLimitStatus: chargeLimitStatusProvider.cachedStatusOnly()
         )
     }
 
-    private func readIoregMetrics() throws -> IoregMetrics {
-        let data = try CommandRunner.run(executable: "/usr/sbin/ioreg", arguments: ["-r", "-c", "AppleSmartBattery", "-a"])
-        guard let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [[String: Any]],
-              let item = plist.first else {
-            throw CocoaError(.fileReadCorruptFile)
+    func prewarmSlowMetricsIfNeeded() {
+        chargeLimitStatusProvider.prewarm()
+        let now = Date()
+        let shouldRefresh = stateQueue.sync { () -> Bool in
+            let isStale = cachedSystemProfilerMetrics == nil
+                || lastSystemProfilerRefreshDate.map({ now.timeIntervalSince($0) >= systemProfilerRefreshInterval }) != false
+            guard isStale, !isSystemProfilerRefreshInFlight else { return false }
+            isSystemProfilerRefreshInFlight = true
+            return true
+        }
+        guard shouldRefresh else { return }
+
+        profilerQueue.async { [weak self] in
+            guard let self else { return }
+            let result = Result { try self.readSystemProfilerMetrics() }
+            self.stateQueue.async {
+                self.isSystemProfilerRefreshInFlight = false
+                switch result {
+                case let .success(metrics):
+                    self.cachedSystemProfilerMetrics = metrics
+                    self.lastSystemProfilerRefreshDate = Date()
+                case let .failure(error):
+                    self.logger.error("Failed to fetch system_profiler battery metrics: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
+    }
+
+    private func readIORegistryMetrics() throws -> IORegistryMetrics {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        guard service != IO_OBJECT_NULL else {
+            throw SupplementalMetricsError.appleSmartBatteryNotFound
+        }
+        defer { IOObjectRelease(service) }
+
+        var unmanagedProperties: Unmanaged<CFMutableDictionary>?
+        let result = IORegistryEntryCreateCFProperties(
+            service,
+            &unmanagedProperties,
+            kCFAllocatorDefault,
+            IOOptionBits(0)
+        )
+
+        guard result == KERN_SUCCESS,
+              let properties = unmanagedProperties?.takeRetainedValue() as? [String: Any] else {
+            throw SupplementalMetricsError.ioRegistryReadFailed(result)
         }
 
-        let batteryData = item["BatteryData"] as? [String: Any] ?? [:]
-        let telemetry = item["PowerTelemetryData"] as? [String: Any] ?? [:]
-        let adapterDetails = item["AdapterDetails"] as? [String: Any] ?? [:]
+        let batteryData = properties["BatteryData"] as? [String: Any] ?? [:]
+        let chargerData = properties["ChargerData"] as? [String: Any] ?? [:]
+        let telemetry = properties["PowerTelemetryData"] as? [String: Any] ?? [:]
+        let rawAdapterDetails = (properties["AppleRawAdapterDetails"] as? [[String: Any]])?.first ?? [:]
+        let adapterDetails = properties["AdapterDetails"] as? [String: Any] ?? rawAdapterDetails
+        let fedDetails = (properties["FedDetails"] as? [[String: Any]])?
+            .first(where: { $0.boolish("FedExternalConnected") })
+        let protocolDetection = PowerAdapterProtocolDetector.detect(
+            adapterDetails: adapterDetails,
+            fedDetails: fedDetails
+        )
 
-        return IoregMetrics(
-            designCapacityMah: item.int("DesignCapacity") ?? batteryData.int("DesignCapacity"),
-            fullChargeCapacityMah: item.int("AppleRawMaxCapacity") ?? batteryData.int("FccComp1"),
-            cycleCount: item.int("CycleCount") ?? batteryData.int("CycleCount"),
-            temperatureCelsius: item.int("Temperature").map { Double($0) / 100.0 },
-            voltageMillivolts: item.int("Voltage"),
-            amperageMilliamps: item.int("Amperage"),
-            timeRemainingMinutes: item.int("TimeRemaining"),
-            systemInputWatts: telemetry.int("SystemPowerIn").map { Double($0) / 1_000.0 } ?? batteryData.double("AdapterPower"),
-            batteryPowerWatts: telemetry.int("BatteryPower").map { Double($0) / 1_000.0 } ?? batteryData.double("SystemPower"),
+        return IORegistryMetrics(
+            designCapacityMah: properties.int("DesignCapacity") ?? batteryData.int("DesignCapacity"),
+            fullChargeCapacityMah: properties.int("AppleRawMaxCapacity") ?? batteryData.int("FccComp1"),
+            cycleCount: properties.int("CycleCount") ?? batteryData.int("CycleCount"),
+            temperatureCelsius: properties.int("Temperature").map { Double($0) / 100.0 },
+            voltageMillivolts: properties.int("Voltage") ?? properties.int("AppleRawBatteryVoltage"),
+            amperageMilliamps: properties.int("Amperage"),
+            timeRemainingMinutes: properties.int("TimeRemaining"),
+            systemInputWatts: telemetry.powerWatts("SystemPowerIn") ?? batteryData.double("AdapterPower"),
+            batteryPowerWatts: telemetry.powerWatts("BatteryPower") ?? batteryData.double("SystemPower"),
             adapterWatts: adapterDetails.int("Watts"),
             adapterVoltageMillivolts: adapterDetails.int("AdapterVoltage"),
-            adapterCurrentMilliamps: adapterDetails.int("Current")
+            adapterCurrentMilliamps: adapterDetails.int("Current"),
+            adapterInputVoltageMillivolts: telemetry.int("SystemVoltageIn"),
+            adapterInputCurrentMilliamps: telemetry.int("SystemCurrentIn"),
+            chargeStatus: properties["ChargeStatus"] as? String,
+            notChargingReason: chargerData.uint64("NotChargingReason"),
+            protocolDetection: protocolDetection
         )
     }
 
@@ -110,13 +174,27 @@ final class SupplementalBatteryMetricsProvider: @unchecked Sendable {
             .flatMap { Double($0) }
 
         return SystemProfilerMetrics(
-            cycleCount: health["sppower_battery_cycle_count"] as? Int,
+            cycleCount: health.int("sppower_battery_cycle_count"),
             maximumCapacityPercent: maximumCapacityPercent
         )
     }
 }
 
-private struct IoregMetrics {
+private enum SupplementalMetricsError: LocalizedError {
+    case appleSmartBatteryNotFound
+    case ioRegistryReadFailed(kern_return_t)
+
+    var errorDescription: String? {
+        switch self {
+        case .appleSmartBatteryNotFound:
+            return "未找到 AppleSmartBattery IORegistry 服务。"
+        case let .ioRegistryReadFailed(code):
+            return "读取 AppleSmartBattery IORegistry 属性失败（\(code)）。"
+        }
+    }
+}
+
+private struct IORegistryMetrics {
     let designCapacityMah: Int?
     let fullChargeCapacityMah: Int?
     let cycleCount: Int?
@@ -129,6 +207,11 @@ private struct IoregMetrics {
     let adapterWatts: Int?
     let adapterVoltageMillivolts: Int?
     let adapterCurrentMilliamps: Int?
+    let adapterInputVoltageMillivolts: Int?
+    let adapterInputCurrentMilliamps: Int?
+    let chargeStatus: String?
+    let notChargingReason: UInt64?
+    let protocolDetection: PowerAdapterProtocolDetection
 }
 
 private struct SystemProfilerMetrics {
@@ -138,18 +221,55 @@ private struct SystemProfilerMetrics {
 
 private extension Dictionary where Key == String, Value == Any {
     func int(_ key: String) -> Int? {
-        self[key] as? Int
+        if let value = self[key] as? Int {
+            return value
+        }
+        if let value = self[key] as? NSNumber {
+            return value.intValue
+        }
+        return nil
     }
 
     func double(_ key: String) -> Double? {
         if let value = self[key] as? Double {
             return value
         }
-
         if let value = self[key] as? Int {
             return Double(value)
         }
-
+        if let value = self[key] as? NSNumber {
+            return value.doubleValue
+        }
         return nil
+    }
+
+    func uint64(_ key: String) -> UInt64? {
+        if let value = self[key] as? UInt64 {
+            return value
+        }
+        if let value = self[key] as? Int, value >= 0 {
+            return UInt64(value)
+        }
+        if let value = self[key] as? NSNumber {
+            return value.uint64Value
+        }
+        return nil
+    }
+
+    func powerWatts(_ key: String) -> Double? {
+        guard let raw = double(key) else {
+            return nil
+        }
+        return raw / 1_000.0
+    }
+
+    func boolish(_ key: String) -> Bool {
+        if let value = self[key] as? Bool {
+            return value
+        }
+        if let value = self[key] as? NSNumber {
+            return value.boolValue
+        }
+        return false
     }
 }

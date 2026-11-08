@@ -21,5 +21,9 @@ let package = Package(
                 .linkedFramework("ServiceManagement"),
             ]
         ),
+        .testTarget(
+            name: "MacoPowerMonitorTests",
+            dependencies: ["MacoPowerMonitor"]
+        ),
     ]
 )

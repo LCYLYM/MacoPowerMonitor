@@ -22,6 +22,7 @@ struct PowerLineChart: View {
                         Image(systemName: "waveform.path.ecg")
                             .font(.system(size: 24))
                             .foregroundStyle(.white.opacity(0.35))
+                            .help("趋势图暂缺足够的数据样本。")
                         Text(emptyStateTitle)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.white.opacity(0.42))

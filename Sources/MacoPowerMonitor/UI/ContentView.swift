@@ -6,6 +6,12 @@ struct ContentView: View {
     @State private var selectedRange: ChartTimeRange = .twentyFourHours
     @State private var showingSettings = false
 
+    init(store: PowerMonitorStore) {
+        self.store = store
+        _selectedChartMetrics = State(initialValue: store.selectedHistoryMetrics)
+        _selectedRange = State(initialValue: store.selectedHistoryRange)
+    }
+
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 24)
@@ -23,9 +29,10 @@ struct ContentView: View {
                         .strokeBorder(Color.white.opacity(0.12))
                 )
 
-            ScrollView(.vertical, showsIndicators: true) {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 8) {
                     headerSection
+                    adapterSection
                     chartSection
                     summaryGridSection
                     processSection
@@ -33,12 +40,23 @@ struct ContentView: View {
                 }
                 .padding(10)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 24))
         }
         .frame(width: AppConstants.panelWidth)
         .frame(height: AppConstants.panelHeight)
         .clipped()
+        .ignoresSafeArea()
         .sheet(isPresented: $showingSettings) {
             SettingsView(store: store)
+        }
+        .onAppear {
+            store.updateHistorySelection(metrics: selectedChartMetrics, range: selectedRange)
+        }
+        .onChange(of: selectedChartMetrics) { metrics in
+            store.updateHistorySelection(metrics: metrics, range: selectedRange)
+        }
+        .onChange(of: selectedRange) { range in
+            store.updateHistorySelection(metrics: selectedChartMetrics, range: range)
         }
     }
 
@@ -47,6 +65,7 @@ struct ContentView: View {
             HStack {
                 Image(systemName: "menubar.dock.rectangle")
                     .foregroundStyle(PowerMonitorTheme.tertiary)
+                    .help("Maco Power Monitor 控制面板。")
 
                 Spacer()
 
@@ -104,18 +123,92 @@ struct ContentView: View {
             }
 
             HStack(spacing: 6) {
-                HeaderCapsule(title: "系统输入", value: PowerFormatting.watts(store.latestSnapshot?.systemPowerWatts))
-                    .help("当前整机输入功率，反映系统这一刻大概正在消耗多少功率。")
-                HeaderCapsule(title: "电池电流", value: PowerFormatting.amps(fromMilliamps: store.latestSnapshot?.amperageMilliamps))
-                    .help("电池侧即时电流。")
-                HeaderCapsule(title: "适配器额定", value: store.latestSnapshot?.adapterWatts.map { "\($0)W" } ?? "--")
-                    .help("适配器协商到的最大供电能力。本机当前是 65W，不代表系统此刻真的用到 65W。")
+                HeaderCapsule(title: "实时输入功率", value: PowerFormatting.watts(store.latestSnapshot?.adapterRealtimePowerWatts))
+                    .help("每秒读取 Mac 电源遥测报告的当前输入功率。")
+                HeaderCapsule(title: "实时输入电流", value: PowerFormatting.amps(fromMilliamps: store.latestSnapshot?.adapterRealtimeCurrentMilliamps))
+                    .help("每秒读取 PowerTelemetryData.SystemCurrentIn；不是电源合约的最大电流。")
+                HeaderCapsule(title: "电池实时电流", value: PowerFormatting.amps(fromMilliamps: store.latestSnapshot?.amperageMilliamps))
+                    .help("每秒直接读取 AppleSmartBattery 的充电或放电电流。")
             }
         }
         .padding(10)
         .background(PowerMonitorTheme.cardBackground)
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(PowerMonitorTheme.cardBorder))
         .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    private var adapterSection: some View {
+        let snapshot = store.latestSnapshot
+        let isConnected = snapshot?.source == .acPower
+
+        return SectionCard(title: "充电器 / 电源适配器") {
+            VStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill((isConnected ? PowerMonitorTheme.accent : PowerMonitorTheme.muted).opacity(0.14))
+                        Image(systemName: isConnected ? "powerplug.fill" : "powerplug")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(isConnected ? PowerMonitorTheme.accent : PowerMonitorTheme.muted)
+                    }
+                    .frame(width: 42, height: 42)
+                    .help(isConnected ? "已连接电源适配器。" : "当前未连接电源适配器。")
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(snapshot?.adapterProtocolDisplayName ?? "等待首次采样")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(PowerMonitorTheme.secondary)
+                        Text(adapterProtocolDetail)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(PowerMonitorTheme.muted)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 6)
+
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(PowerFormatting.watts(snapshot?.adapterRealtimePowerWatts))
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(isConnected ? PowerMonitorTheme.green : PowerMonitorTheme.tertiary)
+                            .monospacedDigit()
+                        Text("实时输入功率")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(PowerMonitorTheme.muted)
+                        Text(PowerFormatting.amps(fromMilliamps: snapshot?.adapterRealtimeCurrentMilliamps))
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(PowerMonitorTheme.cyan)
+                            .monospacedDigit()
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    InlineInfoPill(label: "实时输入电压", value: PowerFormatting.volts(fromMillivolts: snapshot?.adapterRealtimeVoltageMillivolts))
+                        .help("每秒读取 PowerTelemetryData.SystemVoltageIn。")
+                    InlineInfoPill(label: "实时输入电流", value: PowerFormatting.amps(fromMilliamps: snapshot?.adapterRealtimeCurrentMilliamps))
+                        .help("每秒读取 PowerTelemetryData.SystemCurrentIn。")
+                    InlineInfoPill(label: "电池实时电流", value: PowerFormatting.amps(fromMilliamps: snapshot?.amperageMilliamps))
+                        .help("正值为充电，负值为放电；每秒读取一次。")
+                    InlineInfoPill(label: "协商电流上限", value: PowerFormatting.amps(fromMilliamps: snapshot?.adapterCurrentMilliamps))
+                        .help("电源合约允许的最大电流，不是瞬时电流。")
+                }
+
+                HStack(spacing: 6) {
+                    InlineInfoPill(label: "协商电压", value: PowerFormatting.volts(fromMillivolts: snapshot?.adapterVoltageMillivolts))
+                    InlineInfoPill(label: "合约上限", value: snapshot?.adapterWatts.map { "\($0) W" } ?? "-- W")
+                    InlineInfoPill(label: "PD 修订", value: adapterPDRevisionText)
+                    InlineInfoPill(label: "刷新频率", value: "1 秒")
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Image(systemName: "info.circle")
+                        .help("查看电源数据来源与协议识别说明。")
+                    Text("功率、输入电压和输入电流每秒读取 Mac 侧 PowerTelemetryData；macOS 不公开墙插侧损耗。QC/Apple 私有协议仅在系统有明确标识时显示，不做猜测。")
+                }
+                .font(.system(size: 9))
+                .foregroundStyle(PowerMonitorTheme.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 
     private var chartSection: some View {
@@ -129,7 +222,7 @@ struct ContentView: View {
                 ForEach(Array(visibleMetrics.enumerated()), id: \.element) { index, metric in
                     MetricTrendSection(
                         metric: metric,
-                        series: store.chartSeries(for: metric, range: selectedRange),
+                        series: store.chartSeriesByMetric[metric] ?? [],
                         range: selectedRange,
                         showsXAxis: index == visibleMetrics.count - 1
                     )
@@ -162,7 +255,7 @@ struct ContentView: View {
     }
 
     private var processSection: some View {
-        SectionCard(title: "较耗电应用") {
+        SectionCard(title: "CPU 活跃应用") {
             VStack(spacing: 6) {
                 ForEach(Array(store.topProcesses.prefix(4))) { process in
                     ProcessEnergyRow(process: process)
@@ -196,7 +289,7 @@ struct ContentView: View {
                     Text("数据源")
                         .foregroundStyle(PowerMonitorTheme.muted)
                     Spacer()
-                    Text("IOPowerSources / ioreg / system_profiler")
+                    Text("IOPowerSources / IORegistry / system_profiler")
                         .foregroundStyle(PowerMonitorTheme.secondary)
                 }
                 .font(.system(size: 10, weight: .medium))
@@ -220,6 +313,28 @@ struct ContentView: View {
         }
     }
 
+    private var adapterProtocolDetail: String {
+        guard let snapshot = store.latestSnapshot else {
+            return "正在读取电源协商信息"
+        }
+        guard snapshot.source == .acPower else {
+            return "当前由电池供电"
+        }
+        return snapshot.adapterProtocolDetail ?? "macOS 未公开更详细的协议字段"
+    }
+
+    private var adapterPDRevisionText: String {
+        guard let code = store.latestSnapshot?.adapterPDRevisionCode else {
+            return "--"
+        }
+        switch code {
+        case 1: return "PD 1.0"
+        case 2: return "PD 2.0"
+        case 3: return "PD 3.0"
+        default: return "PD 修订码 \(code)"
+        }
+    }
+
     private var headerTime: String {
         guard let snapshot = store.latestSnapshot else {
             return "--:--"
@@ -235,6 +350,10 @@ struct ContentView: View {
     private var headerSubtitle: String {
         guard let snapshot = store.latestSnapshot else {
             return "等待首次采样"
+        }
+
+        if let chargeHoldReason = snapshot.chargeHoldReason {
+            return chargeHoldReason.displayText
         }
 
         if snapshot.source == .acPower && snapshot.isCharging {
@@ -267,6 +386,7 @@ struct ContentView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
+                .help(selectedChartMetrics.contains(metric) ? "隐藏\(metric.title)趋势图。" : "显示\(metric.title)趋势图。")
             }
         }
         .padding(4)
@@ -286,14 +406,25 @@ struct ContentView: View {
     }
 
     private var subsystemSummary: String {
-        if let snapshot = store.latestSnapshot,
-           let cpu = snapshot.cpuPowerWatts,
-           let gpu = snapshot.gpuPowerWatts,
-           let ane = snapshot.anePowerWatts {
-            return String(format: "%.1f/%.1f/%.1fW", cpu, gpu, ane)
+        guard let snapshot = store.latestSnapshot else {
+            return "--"
         }
 
-        return "需授权"
+        let readings = [snapshot.cpuPowerWatts, snapshot.gpuPowerWatts, snapshot.anePowerWatts]
+        guard readings.contains(where: { $0 != nil }) else {
+            if snapshot.subsystemPowerUnavailableReason?.contains("正在启动") == true {
+                return "采样启动中"
+            }
+            if snapshot.subsystemPowerUnavailableReason?.contains("暂未返回") == true {
+                return "采样中断"
+            }
+            return "需授权"
+        }
+
+        let values = readings.map { value in
+            value.map { String(format: "%.1f", $0) } ?? "--"
+        }
+        return values.joined(separator: "/") + "W"
     }
 }
 
@@ -399,9 +530,9 @@ private struct MetricTrendSection: View {
     private var metricHelpText: String {
         switch metric {
         case .power:
-            return "同时显示系统输入、电池输出和电池回充，便于看清功率到底从哪里来、流向哪里去。"
+            return "同时显示适配器实时输入、电池输出和电池回充，便于看清功率从哪里来、流向哪里去。"
         case .batteryLevel:
-            return "显示电池百分比变化，和功耗、电流时间轴保持一致。"
+            return "显示电池百分比变化；横轴固定对应所选时间范围，便于对照每个时间点的电量。"
         case .chargeRate:
             return "同时显示充电电流和放电电流，避免把正负方向混在一条线上。"
         }
@@ -436,7 +567,7 @@ private struct ChartSeriesValuePill: View {
 
     private var indicatorColor: Color {
         switch series.id {
-        case .systemInputPower, .batteryLevel:
+        case .adapterInputPower, .batteryLevel:
             return PowerMonitorTheme.accent
         case .batteryDischargePower:
             return Color(red: 1.00, green: 0.66, blue: 0.21)
@@ -495,7 +626,7 @@ private struct ProcessEnergyRow: View {
                 .foregroundStyle(PowerMonitorTheme.muted)
                 .frame(width: 42, alignment: .trailing)
         }
-        .help("PID \(process.pid) · CPU \(String(format: "%.1f%%", process.cpuPercent)) · POWER \(String(format: "%.1f", process.powerScore)) · 内存 \(process.memoryText)")
+        .help("PID \(process.pid) · CPU \(String(format: "%.1f%%", process.cpuPercent)) · 内存 \(process.memoryText)")
     }
 }
 
@@ -570,10 +701,10 @@ private struct SettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("管理员采样")
                     .font(.system(size: 13, weight: .semibold))
-                Text("点击下面按钮会调用系统管理员鉴权弹窗，读取一次 CPU / GPU / ANE 分项功耗。")
+                Text("授权一次后，会在本次 App 运行期间持续更新 CPU / GPU / ANE 分项功耗；退出 App 后自动停止。")
                     .font(.system(size: 11))
                     .foregroundStyle(PowerMonitorTheme.tertiary)
-                Button("运行管理员权限采样") {
+                Button("启动管理员持续采样") {
                     store.requestPrivilegedSubsystemSample()
                 }
                 .buttonStyle(.borderedProminent)
@@ -582,7 +713,7 @@ private struct SettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("说明")
                     .font(.system(size: 13, weight: .semibold))
-                Text("适配器额定功率表示供电上限，系统输入功率表示当前整机真实消耗。两者不是同一个概念。")
+                Text("适配器协商上限不是实时功率；实时输入来自 Mac 侧电源遥测，也不等于墙插侧功率。")
                 Text("设计循环是公开电源字典里的设计指标，实际循环次数来自系统电池统计。")
             }
             .font(.system(size: 11))
